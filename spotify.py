@@ -200,7 +200,7 @@ class App(ctk.CTk):
             "--format", fmt,
             "--bitrate", f"{bitrate}k",
             "--output", os.path.join(self.download_dir, "{artists} - {title}.{output-ext}"),
-            "--audio-providers", "youtube-music,piped,youtube",
+            "--audio", "piped", "youtube",
         ]
         if self.cookie_file and os.path.exists(self.cookie_file):
             cmd += ["--cookie-file", self.cookie_file]
