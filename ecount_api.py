@@ -133,21 +133,65 @@ class EcountAPI:
     # 기초등록 - 거래처
     # ──────────────────────────────────────────────
 
-    def save_customer(self, payload: dict) -> dict:
-        """거래처 등록/수정.
+    def save_customer(self, cust_list: list[dict]) -> dict:
+        """거래처 등록/수정 (최대 1회 100건).
 
-        payload 예시:
-        {
-            "CUST_CD": "C001",
-            "CUST_NM": "테스트거래처",
-            "CUST_TYPE": "1",        # 1=매출처, 2=매입처, 3=둘다
-            "BUSINESS_NO": "123-45-67890",
-            "CEO_NM": "홍길동",
-            "TEL": "02-1234-5678",
-            "EMAIL": "test@example.com",
-            "ADDRESS": "서울시 강남구"
-        }
+        cust_list 항목 필드:
+          BUSINESS_NO        거래처코드       (필수) STRING(50)
+          CUST_NAME          거래처명         (필수) STRING(100)
+          BOSS_NAME          대표자명                STRING(50)
+          UPTAE              업태                    STRING(50)
+          JONGMOK            종목                    STRING(50)
+          TEL                전화번호                STRING(50)
+          EMAIL              이메일                  STRING(100)
+          POST_NO            우편번호                STRING(10)
+          ADDR               주소                    STRING(200)
+          G_GUBUN            거래처구분              STRING(50)
+          G_BUSINESS_TYPE    거래유형(매출/구매)     STRING(50)
+          G_BUSINESS_CD      거래유형코드            STRING(50)
+          TAX_REG_ID         사업자등록번호          STRING(20)
+          FAX                팩스번호                STRING(50)
+          HP_NO              휴대폰                  STRING(50)
+          DM_POST            배송지 우편번호         STRING(10)
+          DM_ADDR            배송지 주소             STRING(200)
+          REMARKS_WIN        메모(윈도우)            STRING(200)
+          GUBUN              개인/법인 구분          STRING(1)
+          FOREIGN_FLAG       외국거래처여부          STRING(1)
+          EXCHANGE_CODE      외화코드                STRING(10)
+          CUST_GROUP1        거래처그룹1             STRING(50)
+          CUST_GROUP2        거래처그룹2             STRING(50)
+          URL_PATH           홈페이지 URL            STRING(200)
+          REMARKS            비고                    STRING(200)
+          OUTORDER_YN        외주거래처여부          STRING(1)
+          IO_CODE_SL_BASE_YN 거래유형(매출) 기본여부 STRING(1)
+          IO_CODE_SL         거래유형(매출)          STRING(50)
+          IO_CODE_BY_BASE_YN 거래유형(구매) 기본여부 STRING(1)
+          IO_CODE_BY         거래유형(구매)          STRING(50)
+          EMP_CD             담당자코드              STRING(50)
+          MANAGE_BOND_NO     채권번호관리            STRING(1)  B/M/Y/N
+          MANAGE_DEBIT_NO    채무번호관리            STRING(1)  B/M/Y/N
+          CUST_LIMIT         거래처별여신한도        NUMERIC(18,2)
+          O_RATE             출고조정률              NUMERIC(5,2)
+          I_RATE             입고조정률              NUMERIC(5,2)
+          PRICE_GROUP        영업단가그룹            STRING(10)
+          PRICE_GROUP2       구매단가그룹            STRING(10)
+          CUST_LIMIT_TERM    여신기간                STRING(10)
+          CONT1~CONT6        담당자1~6               STRING(50)
+          NO_CUST_USER1~3    사용자정의1~3           STRING(50)
+
+        사용 예시:
+            api.save_customer([
+                {
+                    "BUSINESS_NO": "C001",
+                    "CUST_NAME": "테스트거래처",
+                    "TEL": "02-1234-5678",
+                    "EMAIL": "test@example.com",
+                },
+            ])
+
+        응답: Data.SuccessCnt / Data.FailCnt / Data.ResultDetails 로 건별 결과 확인
         """
+        payload = {"CustList": [{"BulkDatas": item} for item in cust_list]}
         return self._post("AccountBasic/SaveBasicCust", payload)
 
     # ──────────────────────────────────────────────
@@ -546,3 +590,39 @@ def _today() -> str:
 
 def _month_start() -> str:
     return datetime.today().strftime("%Y%m01")
+
+
+# ──────────────────────────────────────────────
+# 응답 파싱 유틸
+# ──────────────────────────────────────────────
+
+import json as _json
+
+
+def parse_bulk_result(result: dict) -> list[dict]:
+    """CustList / 품목 등 벌크 등록 응답의 건별 결과를 파싱해 반환.
+
+    반환 예시:
+    [
+        {"index": 1, "success": True,  "error": ""},
+        {"index": 2, "success": False, "error": "거래처코드 (필수)"},
+    ]
+    """
+    data = result.get("Data", {})
+    raw = data.get("ResultDetails", "[]")
+    if isinstance(raw, str):
+        try:
+            details = _json.loads(raw)
+        except Exception:
+            details = []
+    else:
+        details = raw
+
+    parsed = []
+    for i, item in enumerate(details, start=1):
+        parsed.append({
+            "index": i,
+            "success": item.get("IsSuccess", False),
+            "error": item.get("TotalError", ""),
+        })
+    return parsed
