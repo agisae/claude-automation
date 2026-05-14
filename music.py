@@ -177,12 +177,11 @@ class App(ctk.CTk):
             self.folder_lbl.configure(text=f)
 
     def _get_urls(self):
-        text = self.url_box.get("1.0", "end").strip()
-        urls = [u.strip() for u in text.splitlines() if u.strip()]
-        bad = [u for u in urls if not detect_source(u)]
-        if bad:
-            messagebox.showwarning("알림", f"인식할 수 없는 URL:\n" + "\n".join(bad[:3]))
-            return []
+        text = self.url_box.get("1.0", "end")
+        urls = re.findall(r"https?://[^\s\"'<>]+", text)
+        urls = [u for u in urls if detect_source(u)]
+        if not urls:
+            messagebox.showwarning("알림", "YouTube 또는 Spotify URL을 찾을 수 없습니다.")
         return urls
 
     def _start(self):
