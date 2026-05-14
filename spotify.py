@@ -14,9 +14,10 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Spotify Downloader")
-        self.geometry("680x540")
+        self.geometry("680x600")
         self.resizable(False, False)
         self.download_dir = os.path.expanduser("~/Downloads")
+        self.cookie_file = ""
         self._build_ui()
 
     def _build_ui(self):
@@ -83,33 +84,51 @@ class App(ctk.CTk):
         ctk.CTkButton(folder_row, text="변경", width=60, height=28,
                       command=self._pick_folder).grid(row=0, column=1, padx=(8, 0))
 
+        # Cookie file
+        cookie_frame = ctk.CTkFrame(self, fg_color="transparent")
+        cookie_frame.grid(row=5, column=0, padx=24, pady=(14, 0), sticky="ew")
+        cookie_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(cookie_frame, text="쿠키 파일 (YouTube Music 차단 시 필요)",
+                     font=ctk.CTkFont(size=13, weight="bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+
+        self.cookie_label = ctk.CTkLabel(cookie_frame, text="선택 안 됨",
+                                         font=ctk.CTkFont(size=11), text_color="gray60")
+        self.cookie_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        ctk.CTkButton(cookie_frame, text="파일 선택", width=90, height=28,
+                      command=self._pick_cookie).grid(row=1, column=1, padx=(10, 0), pady=(4, 0), sticky="w")
+
+        ctk.CTkButton(cookie_frame, text="초기화", width=60, height=28, fg_color="gray30",
+                      command=self._clear_cookie).grid(row=1, column=2, padx=(6, 0), pady=(4, 0), sticky="w")
+
         # Progress
         self.progress_label = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=12),
                                            text_color="gray70")
-        self.progress_label.grid(row=5, column=0, padx=24, pady=(20, 4), sticky="w")
+        self.progress_label.grid(row=6, column=0, padx=24, pady=(20, 4), sticky="w")
 
         self.progress_bar = ctk.CTkProgressBar(self, height=12, corner_radius=6)
-        self.progress_bar.grid(row=6, column=0, padx=24, sticky="ew")
+        self.progress_bar.grid(row=7, column=0, padx=24, sticky="ew")
         self.progress_bar.set(0)
 
         self.track_label = ctk.CTkLabel(self, text="", font=ctk.CTkFont(size=11),
                                         text_color="gray60")
-        self.track_label.grid(row=7, column=0, padx=24, pady=(4, 0), sticky="w")
+        self.track_label.grid(row=8, column=0, padx=24, pady=(4, 0), sticky="w")
 
         # Download button
         self.dl_btn = ctk.CTkButton(self, text="다운로드", height=48,
                                     font=ctk.CTkFont(size=15, weight="bold"),
                                     command=self._start_download)
-        self.dl_btn.grid(row=8, column=0, padx=24, pady=(20, 0), sticky="ew")
+        self.dl_btn.grid(row=9, column=0, padx=24, pady=(20, 0), sticky="ew")
 
         # Log
         ctk.CTkLabel(self, text="로그", font=ctk.CTkFont(size=12, weight="bold")).grid(
-            row=9, column=0, padx=24, pady=(16, 4), sticky="w")
+            row=10, column=0, padx=24, pady=(16, 4), sticky="w")
 
         self.log_box = ctk.CTkTextbox(self, height=110,
                                       font=ctk.CTkFont(family="Consolas", size=11),
                                       state="disabled")
-        self.log_box.grid(row=10, column=0, padx=24, pady=(0, 24), sticky="ew")
+        self.log_box.grid(row=11, column=0, padx=24, pady=(0, 24), sticky="ew")
 
     # ── helpers ──────────────────────────────────────────────
 
@@ -130,6 +149,18 @@ class App(ctk.CTk):
         if folder:
             self.download_dir = folder
             self.folder_label.configure(text=self._short_path(folder))
+
+    def _pick_cookie(self):
+        path = filedialog.askopenfilename(
+            title="쿠키 파일 선택",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if path:
+            self.cookie_file = path
+            self.cookie_label.configure(text=os.path.basename(path), text_color="green")
+
+    def _clear_cookie(self):
+        self.cookie_file = ""
+        self.cookie_label.configure(text="선택 안 됨", text_color="gray60")
 
     def _log(self, msg):
         self.log_box.configure(state="normal")
@@ -170,6 +201,8 @@ class App(ctk.CTk):
             "--bitrate", f"{bitrate}k",
             "--output", os.path.join(self.download_dir, "{artists} - {title}.{output-ext}"),
         ]
+        if self.cookie_file and os.path.exists(self.cookie_file):
+            cmd += ["--cookie-file", self.cookie_file]
 
         try:
             process = subprocess.Popen(
