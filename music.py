@@ -26,7 +26,10 @@ def get_spotify_title(url):
     oembed = f"https://open.spotify.com/oembed?url={url}"
     req = urllib.request.Request(oembed, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read()).get("title", "")
+        data = json.loads(r.read())
+    title = data.get("title", "")
+    artist = data.get("author_name", "")
+    return f"{artist} - {title}" if artist else title
 
 
 class DownloadRow(ctk.CTkFrame):
