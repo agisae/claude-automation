@@ -239,7 +239,7 @@ class App(ctk.CTk):
             ],
             "progress_hooks": [hook],
             "ignoreerrors": True,   # 플레이리스트 중 일부 실패해도 계속 진행
-            "quiet": True, "no_warnings": True,
+            "quiet": False, "no_warnings": False,
         }
 
         try:
@@ -254,12 +254,12 @@ class App(ctk.CTk):
                     ydl.download([f"ytsearch1:{title}"])
 
             else:  # youtube (단일 영상 or 플레이리스트)
+                self.after(0, row.update, "플레이리스트/영상 정보 가져오는 중...", 0.05)
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                 if info:
-                    # 플레이리스트면 제목 + 곡 수 표시
                     if info.get("_type") == "playlist":
-                        count = len(info.get("entries") or [])
+                        count = len([e for e in (info.get("entries") or []) if e])
                         self.after(0, row.set_title, f"{info.get('title','')}  ({count}곡)")
                     else:
                         self.after(0, row.set_title, info.get("title", url))
