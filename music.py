@@ -226,14 +226,19 @@ class App(ctk.CTk):
             elif d["status"] == "finished":
                 self.after(0, row.update, "변환 중...", 0.95)
 
+        # 저장 폴더 없으면 자동 생성
+        save_dir = self.dir_ref[0]
+        os.makedirs(save_dir, exist_ok=True)
+
         opts = {
             "format": "bestaudio/best",
-            "outtmpl": os.path.join(self.dir_ref[0], "%(title)s.%(ext)s"),
+            "outtmpl": os.path.join(save_dir, "%(title)s.%(ext)s"),
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": fmt, "preferredquality": quality},
                 {"key": "FFmpegMetadata"},
             ],
             "progress_hooks": [hook],
+            "ignoreerrors": True,   # 플레이리스트 중 일부 실패해도 계속 진행
             "quiet": True, "no_warnings": True,
         }
 
@@ -245,19 +250,25 @@ class App(ctk.CTk):
                     raise Exception("곡 정보를 가져올 수 없습니다.")
                 self.after(0, row.set_title, title)
                 self.after(0, row.update, "YouTube 검색 중...", 0.1)
-                search_url = f"ytsearch1:{title}"
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([search_url])
+                    ydl.download([f"ytsearch1:{title}"])
 
-            else:  # youtube
+            else:  # youtube (단일 영상 or 플레이리스트)
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
-                self.after(0, row.set_title, info.get("title", url))
+                if info:
+                    # 플레이리스트면 제목 + 곡 수 표시
+                    if info.get("_type") == "playlist":
+                        count = len(info.get("entries") or [])
+                        self.after(0, row.set_title, f"{info.get('title','')}  ({count}곡)")
+                    else:
+                        self.after(0, row.set_title, info.get("title", url))
 
             self.after(0, row.done, True)
 
         except Exception as e:
-            self.after(0, row.update, str(e)[:70])
+            err = str(e)
+            self.after(0, row.update, err[:80] if err else "알 수 없는 오류")
             self.after(0, row.done, False)
 
 
