@@ -366,7 +366,9 @@ class App(ctk.CTk):
             "socket_timeout": 30,
             "retries": 3,
             "quiet": True, "no_warnings": True,
-            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+            "windowsfilenames": True,
+            "extractor_args": {"youtube": {"player_client": ["tv_embedded", "android", "web"]}},
+            "http_headers": {"User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12) gzip"},
         }
 
         try:
