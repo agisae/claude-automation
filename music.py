@@ -311,11 +311,17 @@ class App(ctk.CTk):
 
         self.dl_btn.configure(state="disabled", text=f"{len(urls)}개 다운로드 중...")
         workers = int(self.worker_var.get())
-        threading.Thread(target=self._run_all, args=(urls, workers), daemon=True).start()
+        fmt = self.fmt_var.get()
+        quality = self.qual_var.get().replace("k", "")
+        save_dir = self.dir_ref[0]
+        threading.Thread(target=self._run_all,
+                         args=(urls, workers, fmt, quality, save_dir),
+                         daemon=True).start()
 
-    def _run_all(self, urls, workers):
+    def _run_all(self, urls, workers, fmt, quality, save_dir):
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(self._download_one, i, url) for i, url in enumerate(urls)]
+            futures = [pool.submit(self._download_one, i, url, fmt, quality, save_dir)
+                       for i, url in enumerate(urls)]
             for f in futures:
                 try:
                     f.result()
@@ -323,11 +329,10 @@ class App(ctk.CTk):
                     pass
         self.after(0, lambda: self.dl_btn.configure(state="normal", text="다운로드"))
 
-    def _download_one(self, idx, url):
+    def _download_one(self, idx, url, fmt, quality, save_dir):
         row = self._rows[idx]
         source = detect_source(url)
-        fmt = self.fmt_var.get()
-        quality = self.qual_var.get().replace("k", "")
+        self.after(0, row.update, "시작 중...", 0.02)
 
         def hook(d):
             if d["status"] == "downloading":
@@ -340,7 +345,6 @@ class App(ctk.CTk):
             elif d["status"] == "finished":
                 self.after(0, row.update, "변환 중...", 0.95)
 
-        save_dir = self.dir_ref[0]
         os.makedirs(save_dir, exist_ok=True)
 
         opts = {
