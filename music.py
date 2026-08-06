@@ -7,12 +7,34 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox
 import yt_dlp
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 DEFAULT_DIR = r"D:\Soulseek Downloads\complete"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    return {}
+
+def save_config(data):
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(data, f)
+
+def get_spotify_client():
+    cfg = load_config()
+    cid = cfg.get("spotify_client_id", "")
+    secret = cfg.get("spotify_client_secret", "")
+    if not cid or not secret:
+        return None
+    return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+        client_id=cid, client_secret=secret))
 
 def detect_source(url):
     if "spotify.com" in url:
@@ -21,15 +43,54 @@ def detect_source(url):
         return "youtube"
     return None
 
+def spotify_url_type(url):
+    if "/playlist/" in url:
+        return "playlist"
+    if "/album/" in url:
+        return "album"
+    return "track"
 
-def get_spotify_title(url):
-    oembed = f"https://open.spotify.com/oembed?url={url}"
-    req = urllib.request.Request(oembed, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        data = json.loads(r.read())
-    title = data.get("title", "")
-    artist = data.get("author_name", "")
-    return f"{artist} - {title}" if artist else title
+def get_spotify_tracks(url):
+    """URL에서 검색어 목록 반환. 플레이리스트/앨범은 전체 트랙."""
+    url_type = spotify_url_type(url)
+    sp = get_spotify_client()
+
+    # 단일 트랙이거나 API 없으면 oEmbed로 처리
+    if url_type == "track" or sp is None:
+        oembed = f"https://open.spotify.com/oembed?url={url}"
+        req = urllib.request.Request(oembed, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
+        title = data.get("title", "")
+        artist = data.get("author_name", "")
+        query = f"{artist} - {title}" if artist else title
+        return [query], title
+
+    tracks = []
+    if url_type == "playlist":
+        playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
+        result = sp.playlist(playlist_id)
+        name = result["name"]
+        items = result["tracks"]["items"]
+        while result["tracks"].get("next"):
+            result["tracks"] = sp.next(result["tracks"])
+            items += result["tracks"]["items"]
+        for item in items:
+            t = item.get("track")
+            if t:
+                artists = ", ".join(a["name"] for a in t["artists"])
+                tracks.append(f"{artists} - {t['name']}")
+
+    elif url_type == "album":
+        album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
+        result = sp.album(album_id)
+        name = result["name"]
+        artist = result["artists"][0]["name"]
+        items = result["tracks"]["items"]
+        for t in items:
+            tracks.append(f"{artist} - {t['name']}")
+
+    return tracks, name
 
 
 class DownloadRow(ctk.CTkFrame):
@@ -98,9 +159,15 @@ class App(ctk.CTk):
         ctk.CTkLabel(self, text="Music Downloader",
                      font=ctk.CTkFont(size=22, weight="bold")).grid(
             row=0, column=0, padx=24, pady=(22, 2), sticky="w")
-        ctk.CTkLabel(self, text="YouTube · Spotify URL을 자동으로 감지합니다",
+        hdr = ctk.CTkFrame(self, fg_color="transparent")
+        hdr.grid(row=1, column=0, padx=24, pady=(0, 14), sticky="ew")
+        hdr.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(hdr, text="YouTube · Spotify URL을 자동으로 감지합니다",
                      font=ctk.CTkFont(size=12), text_color="gray60").grid(
-            row=1, column=0, padx=24, pady=(0, 14), sticky="w")
+            row=0, column=0, sticky="w")
+        ctk.CTkButton(hdr, text="⚙ Spotify 설정", width=120, height=26,
+                      fg_color="gray30", hover_color="gray40",
+                      command=self._spotify_settings).grid(row=0, column=1)
 
         # 저장 위치
         bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -115,7 +182,7 @@ class App(ctk.CTk):
                       command=self._pick_folder).grid(row=0, column=2)
 
         # URL 입력
-        ctk.CTkLabel(self, text="URL 입력  (한 줄에 하나씩, YouTube / Spotify 섞어도 됩니다)",
+        ctk.CTkLabel(self, text="URL 입력  (YouTube / Spotify 섞어도 됩니다)",
                      font=ctk.CTkFont(size=12, weight="bold")).grid(
             row=3, column=0, padx=24, pady=(0, 4), sticky="w")
 
@@ -179,6 +246,35 @@ class App(ctk.CTk):
             self.dir_ref[0] = f
             self.folder_lbl.configure(text=f)
 
+    def _spotify_settings(self):
+        cfg = load_config()
+        win = ctk.CTkToplevel(self)
+        win.title("Spotify API 설정")
+        win.geometry("460x220")
+        win.resizable(False, False)
+        win.grab_set()
+
+        ctk.CTkLabel(win, text="Spotify Client ID",
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(padx=24, pady=(20,4), anchor="w")
+        cid_entry = ctk.CTkEntry(win, width=410, height=36)
+        cid_entry.insert(0, cfg.get("spotify_client_id", ""))
+        cid_entry.pack(padx=24)
+
+        ctk.CTkLabel(win, text="Spotify Client Secret",
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(padx=24, pady=(12,4), anchor="w")
+        sec_entry = ctk.CTkEntry(win, width=410, height=36, show="*")
+        sec_entry.insert(0, cfg.get("spotify_client_secret", ""))
+        sec_entry.pack(padx=24)
+
+        def save():
+            cfg["spotify_client_id"] = cid_entry.get().strip()
+            cfg["spotify_client_secret"] = sec_entry.get().strip()
+            save_config(cfg)
+            messagebox.showinfo("저장됨", "Spotify API 키가 저장되었습니다!")
+            win.destroy()
+
+        ctk.CTkButton(win, text="저장", height=36, command=save).pack(padx=24, pady=16, fill="x")
+
     def _get_urls(self):
         text = self.url_box.get("1.0", "end")
         urls = re.findall(r"https?://[^\s\"'<>]+", text)
@@ -226,7 +322,6 @@ class App(ctk.CTk):
             elif d["status"] == "finished":
                 self.after(0, row.update, "변환 중...", 0.95)
 
-        # 저장 폴더 없으면 자동 생성
         save_dir = self.dir_ref[0]
         os.makedirs(save_dir, exist_ok=True)
 
@@ -238,23 +333,26 @@ class App(ctk.CTk):
                 {"key": "FFmpegMetadata"},
             ],
             "progress_hooks": [hook],
-            "ignoreerrors": True,   # 플레이리스트 중 일부 실패해도 계속 진행
+            "ignoreerrors": True,
             "quiet": False, "no_warnings": False,
         }
 
         try:
             if source == "spotify":
                 self.after(0, row.update, "Spotify 정보 가져오는 중...", 0.05)
-                title = get_spotify_title(url)
-                if not title:
-                    raise Exception("곡 정보를 가져올 수 없습니다.")
-                self.after(0, row.set_title, title)
-                self.after(0, row.update, "YouTube 검색 중...", 0.1)
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([f"ytsearch1:{title}"])
+                tracks, name = get_spotify_tracks(url)
+                if not tracks:
+                    raise Exception("트랙 정보를 가져올 수 없습니다.")
+                count = len(tracks)
+                self.after(0, row.set_title, f"{name}  ({count}곡)" if count > 1 else name)
+                for i, query in enumerate(tracks):
+                    pct = 0.1 + (i / count * 0.85)
+                    self.after(0, row.update, f"[{i+1}/{count}] {query[:50]}", pct)
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        ydl.download([f"ytsearch1:{query}"])
 
-            else:  # youtube (단일 영상 or 플레이리스트)
-                self.after(0, row.update, "플레이리스트/영상 정보 가져오는 중...", 0.05)
+            else:  # youtube
+                self.after(0, row.update, "정보 가져오는 중...", 0.05)
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                 if info:
