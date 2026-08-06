@@ -36,6 +36,16 @@ def get_spotify_client():
     return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
         client_id=cid, client_secret=secret))
 
+def clean_url(url):
+    """Strip tracking params (si, feature, pp, ...) that break yt-dlp."""
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    parsed = urlparse(url)
+    if re.search(r"(youtube\.com|youtu\.be)", parsed.netloc):
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        keep = {k: v for k, v in params.items() if k in ("v", "list", "index", "t", "start")}
+        return urlunparse(parsed._replace(query=urlencode(keep, doseq=True)))
+    return url
+
 def detect_source(url):
     if "spotify.com" in url:
         return "spotify"
@@ -339,6 +349,7 @@ class App(ctk.CTk):
 
     def _download_one(self, idx, url, fmt, quality, save_dir):
         row = self._rows[idx]
+        url = clean_url(url)
         source = detect_source(url)
         self.after(0, row.update, "시작 중...", 0.02)
 
