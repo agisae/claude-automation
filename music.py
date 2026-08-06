@@ -301,6 +301,14 @@ class App(ctk.CTk):
         if not urls:
             return
 
+        save_dir = self.dir_ref[0]
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("저장 폴더 오류",
+                f"저장 위치를 만들 수 없습니다:\n{save_dir}\n\n{e}\n\n'변경' 버튼으로 다른 폴더를 선택해 주세요.")
+            return
+
         for w in self.queue_frame.winfo_children():
             w.destroy()
         self._rows = []
