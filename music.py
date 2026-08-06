@@ -366,6 +366,7 @@ class App(ctk.CTk):
             "socket_timeout": 30,
             "retries": 3,
             "quiet": True, "no_warnings": True,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
 
         try:
