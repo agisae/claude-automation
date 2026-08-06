@@ -130,13 +130,13 @@ class DownloadRow(ctk.CTkFrame):
         if pct is not None:
             self.prog.set(pct)
 
-    def done(self, ok):
+    def done(self, ok, msg=""):
         if ok:
             self.update("완료", 1.0)
             self.status_lbl.configure(text_color="#4CAF50")
             self.prog.configure(progress_color="#4CAF50")
         else:
-            self.update("실패", 0)
+            self.update(msg or "실패", 0)
             self.status_lbl.configure(text_color="#f44336")
             self.prog.configure(progress_color="#f44336")
 
@@ -389,8 +389,7 @@ class App(ctk.CTk):
 
         except Exception as e:
             err = str(e)
-            self.after(0, row.update, err[:80] if err else "알 수 없는 오류")
-            self.after(0, row.done, False)
+            self.after(0, row.done, False, err[:80] if err else "알 수 없는 오류")
 
 
 if __name__ == "__main__":
