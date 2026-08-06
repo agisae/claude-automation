@@ -51,11 +51,9 @@ def spotify_url_type(url):
     return "track"
 
 def get_spotify_tracks(url):
-    """URL에서 검색어 목록 반환. 플레이리스트/앨범은 전체 트랙."""
     url_type = spotify_url_type(url)
     sp = get_spotify_client()
 
-    # 단일 트랙이거나 API 없으면 oEmbed로 처리
     if url_type == "track" or sp is None:
         oembed = f"https://open.spotify.com/oembed?url={url}"
         req = urllib.request.Request(oembed, headers={"User-Agent": "Mozilla/5.0"})
@@ -169,7 +167,6 @@ class App(ctk.CTk):
                       fg_color="gray30", hover_color="gray40",
                       command=self._spotify_settings).grid(row=0, column=1)
 
-        # 저장 위치
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=2, column=0, padx=24, pady=(0, 12), sticky="ew")
         bar.grid_columnconfigure(1, weight=1)
@@ -181,8 +178,7 @@ class App(ctk.CTk):
         ctk.CTkButton(bar, text="변경", width=60, height=26,
                       command=self._pick_folder).grid(row=0, column=2)
 
-        # URL 입력
-        ctk.CTkLabel(self, text="URL 입력  (YouTube / Spotify 섞어도 됩니다)",
+        ctk.CTkLabel(self, text="URL 입력  (YouTube / Spotify 서로 섞어도 됩니다)",
                      font=ctk.CTkFont(size=12, weight="bold")).grid(
             row=3, column=0, padx=24, pady=(0, 4), sticky="w")
 
@@ -197,7 +193,6 @@ class App(ctk.CTk):
                       command=lambda: self.url_box.delete("1.0", "end")).grid(
             row=0, column=1, padx=(8, 0))
 
-        # 옵션
         opt = ctk.CTkFrame(self, fg_color="transparent")
         opt.grid(row=6, column=0, padx=24, pady=(12, 0), sticky="ew")
 
@@ -221,13 +216,11 @@ class App(ctk.CTk):
                           variable=self.worker_var, width=70, height=32).grid(
             row=1, column=2, padx=(20, 0), pady=(4, 0), sticky="w")
 
-        # 다운로드 버튼
         self.dl_btn = ctk.CTkButton(self, text="다운로드", height=44,
                                     font=ctk.CTkFont(size=15, weight="bold"),
                                     command=self._start)
         self.dl_btn.grid(row=7, column=0, padx=24, pady=(14, 0), sticky="ew")
 
-        # 진행 목록
         ctk.CTkLabel(self, text="진행 상황", font=ctk.CTkFont(size=12, weight="bold")).grid(
             row=8, column=0, padx=24, pady=(14, 4), sticky="w")
         self.queue_frame = ctk.CTkScrollableFrame(self, height=180)
@@ -351,7 +344,7 @@ class App(ctk.CTk):
                     with yt_dlp.YoutubeDL(opts) as ydl:
                         ydl.download([f"ytsearch1:{query}"])
 
-            else:  # youtube
+            else:
                 self.after(0, row.update, "정보 가져오는 중...", 0.05)
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
