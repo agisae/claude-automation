@@ -355,12 +355,9 @@ class App(ctk.CTk):
                 {"key": "FFmpegMetadata"},
             ],
             "progress_hooks": [hook],
-            "socket_timeout": 20,
-            "retries": 2,
-            "fragment_retries": 2,
-            "extractor_retries": 2,
+            "socket_timeout": 30,
+            "retries": 3,
             "quiet": True, "no_warnings": True,
-            "noprogress": True,
         }
 
         try:
@@ -378,26 +375,8 @@ class App(ctk.CTk):
 
             else:
                 self.after(0, row.update, "정보 가져오는 중...", 0.05)
-
-                info_result = [None]
-                info_exc = [None]
-
-                def _extract():
-                    try:
-                        with yt_dlp.YoutubeDL(opts) as ydl:
-                            info_result[0] = ydl.extract_info(url, download=True)
-                    except Exception as e:
-                        info_exc[0] = e
-
-                t = threading.Thread(target=_extract, daemon=True)
-                t.start()
-                t.join(timeout=600)
-                if t.is_alive():
-                    raise TimeoutError("다운로드 시간 초과 (10분)")
-                if info_exc[0]:
-                    raise info_exc[0]
-
-                info = info_result[0]
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
                 if info:
                     if info.get("_type") == "playlist":
                         count = len([e for e in (info.get("entries") or []) if e])
