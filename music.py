@@ -375,14 +375,7 @@ class App(ctk.CTk):
 
             else:
                 self.after(0, row.update, "정보 가져오는 중...", 0.05)
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                if info:
-                    if info.get("_type") == "playlist":
-                        count = len([e for e in (info.get("entries") or []) if e])
-                        self.after(0, row.set_title, f"{info.get('title','')}  ({count}곡)")
-                    else:
-                        self.after(0, row.set_title, info.get("title", url))
+                _run_ydl(opts, url, timeout=600)
 
             self.after(0, row.done, True)
 
