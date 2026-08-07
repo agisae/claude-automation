@@ -37,8 +37,9 @@ def get_spotify_client():
         client_id=cid, client_secret=secret))
 
 def clean_url(url):
-    """Strip tracking params (si, feature, pp, ...) that break yt-dlp."""
+    """Normalize YouTube URL and strip tracking params that break yt-dlp."""
     from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    url = re.sub(r"https?://(m\.)?youtube\.com", "https://www.youtube.com", url)
     parsed = urlparse(url)
     if re.search(r"(youtube\.com|youtu\.be)", parsed.netloc):
         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -378,8 +379,7 @@ class App(ctk.CTk):
             "retries": 3,
             "quiet": True, "no_warnings": True,
             "windowsfilenames": True,
-            "extractor_args": {"youtube": {"player_client": ["tv_embedded", "android", "web"]}},
-            "http_headers": {"User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12) gzip"},
+            "extractor_args": {"youtube": {"player_client": ["android"]}},
         }
 
         try:
