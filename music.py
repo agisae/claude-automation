@@ -85,17 +85,16 @@ def get_spotify_tracks(url):
         tracks = []
         if url_type == "playlist":
             playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
-            result = sp.playlist(playlist_id)
-            name = result["name"]
-            items = result["tracks"]["items"]
-            while result["tracks"].get("next"):
-                result["tracks"] = sp.next(result["tracks"])
-                items += result["tracks"]["items"]
-            for item in items:
-                t = item.get("track")
-                if t:
-                    artists = ", ".join(a["name"] for a in t["artists"])
-                    tracks.append(f"{artists} - {t['name']}")
+            info = sp.playlist(playlist_id, fields="name")
+            name = info["name"]
+            page = sp.playlist_items(playlist_id, limit=100)
+            while page:
+                for item in page["items"]:
+                    t = item.get("track")
+                    if t and t.get("name"):
+                        artists = ", ".join(a["name"] for a in t["artists"])
+                        tracks.append(f"{artists} - {t['name']}")
+                page = sp.next(page) if page.get("next") else None
 
         elif url_type == "album":
             album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
