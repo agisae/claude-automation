@@ -7,8 +7,10 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox
 import yt_dlp
+import http.server
+import webbrowser
 import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.oauth2 import SpotifyOAuth
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -27,14 +29,51 @@ def save_config(data):
     with open(CONFIG_FILE, "w") as f:
         json.dump(data, f)
 
+REDIRECT_URI = "http://localhost:8888/callback"
+SPOTIFY_SCOPE = "playlist-read-private playlist-read-collaborative"
+TOKEN_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".spotify_cache")
+
 def get_spotify_client():
     cfg = load_config()
     cid = cfg.get("spotify_client_id", "")
     secret = cfg.get("spotify_client_secret", "")
     if not cid or not secret:
         return None
-    return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-        client_id=cid, client_secret=secret))
+    auth = SpotifyOAuth(client_id=cid, client_secret=secret,
+                        redirect_uri=REDIRECT_URI, scope=SPOTIFY_SCOPE,
+                        cache_path=TOKEN_CACHE, open_browser=False)
+    token = auth.get_cached_token()
+    if token and not auth.is_token_expired(token):
+        return spotipy.Spotify(auth_manager=auth)
+    return None
+
+def do_spotify_login(client_id, client_secret):
+    """Open browser for Spotify OAuth and capture the code via local server."""
+    from urllib.parse import urlparse, parse_qs
+    auth = SpotifyOAuth(client_id=client_id, client_secret=client_secret,
+                        redirect_uri=REDIRECT_URI, scope=SPOTIFY_SCOPE,
+                        cache_path=TOKEN_CACHE, open_browser=False)
+    auth_url = auth.get_authorize_url()
+    result = [None]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            params = parse_qs(urlparse(self.path).query)
+            if "code" in params:
+                result[0] = params["code"][0]
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write("로그인 완료! 이 탭을 닫으세요.".encode("utf-8"))
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+        def log_message(self, *args): pass
+
+    server = http.server.HTTPServer(("localhost", 8888), Handler)
+    webbrowser.open(auth_url)
+    server.serve_forever()
+    if result[0]:
+        auth.get_access_token(result[0], as_dict=False)
+        return True
+    return False
 
 def clean_url(url):
     """Normalize YouTube URL and strip tracking params that break yt-dlp."""
@@ -299,14 +338,33 @@ class App(ctk.CTk):
         sec_entry.insert(0, cfg.get("spotify_client_secret", ""))
         sec_entry.pack(padx=24)
 
-        def save():
-            cfg["spotify_client_id"] = cid_entry.get().strip()
-            cfg["spotify_client_secret"] = sec_entry.get().strip()
-            save_config(cfg)
-            messagebox.showinfo("저장됨", "Spotify API 키가 저장되었습니다!")
-            win.destroy()
+        status_lbl = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11), text_color="gray60")
+        status_lbl.pack(padx=24, pady=(8, 0), anchor="w")
 
-        ctk.CTkButton(win, text="저장", height=36, command=save).pack(padx=24, pady=16, fill="x")
+        def save_and_login():
+            cid = cid_entry.get().strip()
+            sec = sec_entry.get().strip()
+            if not cid or not sec:
+                messagebox.showwarning("알림", "Client ID와 Secret을 입력해 주세요.")
+                return
+            cfg["spotify_client_id"] = cid
+            cfg["spotify_client_secret"] = sec
+            save_config(cfg)
+            status_lbl.configure(text="브라우저에서 로그인 후 돌아오세요...", text_color="gray60")
+            win.update()
+
+            def _login():
+                ok = do_spotify_login(cid, sec)
+                win.after(0, lambda: status_lbl.configure(
+                    text="로그인 완료!" if ok else "로그인 실패 — redirect URI 확인",
+                    text_color="#4CAF50" if ok else "#f44336"))
+                if ok:
+                    win.after(1500, win.destroy)
+
+            threading.Thread(target=_login, daemon=True).start()
+
+        ctk.CTkButton(win, text="저장 & Spotify 로그인", height=36,
+                      command=save_and_login).pack(padx=24, pady=16, fill="x")
 
     def _get_urls(self):
         text = self.url_box.get("1.0", "end")
