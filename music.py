@@ -9,6 +9,9 @@ from tkinter import filedialog, messagebox
 import yt_dlp
 import base64
 import urllib.error
+import urllib.parse
+import http.server
+import webbrowser
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -27,25 +30,96 @@ def save_config(data):
     with open(CONFIG_FILE, "w") as f:
         json.dump(data, f)
 
+REDIRECT_URI = "http://127.0.0.1:8888/callback"
+SPOTIFY_SCOPE = "playlist-read-private playlist-read-collaborative"
+TOKEN_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".spotify_cache")
+
+def _exchange_token(cid, secret, params):
+    creds = base64.b64encode(f"{cid}:{secret}".encode()).decode()
+    req = urllib.request.Request(
+        "https://accounts.spotify.com/api/token",
+        data=urllib.parse.urlencode(params).encode(),
+        headers={"Authorization": f"Basic {creds}",
+                 "Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        raise Exception(f"Spotify 인증 실패 ({e.code}): {body}")
+
 def _spotify_token():
-    """Get Spotify access token via Client Credentials (no redirect URI needed)."""
+    """Return a valid access token, refreshing if needed."""
     cfg = load_config()
     cid = cfg.get("spotify_client_id", "").strip()
     secret = cfg.get("spotify_client_secret", "").strip()
     if not cid or not secret:
         return None
-    creds = base64.b64encode(f"{cid}:{secret}".encode()).decode()
-    req = urllib.request.Request(
-        "https://accounts.spotify.com/api/token",
-        data=b"grant_type=client_credentials",
-        headers={"Authorization": f"Basic {creds}",
-                 "Content-Type": "application/x-www-form-urlencoded"})
+
+    # Try cached user token first
+    if os.path.exists(TOKEN_CACHE):
+        with open(TOKEN_CACHE) as f:
+            cached = json.load(f)
+        import time
+        if cached.get("expires_at", 0) > time.time() + 60:
+            return cached["access_token"]
+        if cached.get("refresh_token"):
+            try:
+                data = _exchange_token(cid, secret, {
+                    "grant_type": "refresh_token",
+                    "refresh_token": cached["refresh_token"]})
+                import time as _t
+                cached["access_token"] = data["access_token"]
+                cached["expires_at"] = _t.time() + data.get("expires_in", 3600)
+                if "refresh_token" in data:
+                    cached["refresh_token"] = data["refresh_token"]
+                with open(TOKEN_CACHE, "w") as f:
+                    json.dump(cached, f)
+                return cached["access_token"]
+            except Exception:
+                pass
+
+    # Fall back to Client Credentials for public content
     try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read())["access_token"]
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="ignore")
-        raise Exception(f"Spotify 인증 실패 ({e.code}): {body}")
+        data = _exchange_token(cid, secret, {"grant_type": "client_credentials"})
+        return data["access_token"]
+    except Exception as e:
+        raise Exception(str(e))
+
+def do_spotify_login(cid, secret):
+    """OAuth browser login — stores user token so private playlists work."""
+    params = urllib.parse.urlencode({
+        "client_id": cid, "response_type": "code",
+        "redirect_uri": REDIRECT_URI, "scope": SPOTIFY_SCOPE})
+    auth_url = f"https://accounts.spotify.com/authorize?{params}"
+    code_box = [None]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            p = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if "code" in p:
+                code_box[0] = p["code"][0]
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write("로그인 완료! 이 탭을 닫으세요.".encode("utf-8"))
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+        def log_message(self, *args): pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 8888), Handler)
+    webbrowser.open(auth_url)
+    server.serve_forever()
+
+    if not code_box[0]:
+        return False
+    import time
+    data = _exchange_token(cid, secret, {
+        "grant_type": "authorization_code",
+        "code": code_box[0], "redirect_uri": REDIRECT_URI})
+    with open(TOKEN_CACHE, "w") as f:
+        json.dump({"access_token": data["access_token"],
+                   "refresh_token": data.get("refresh_token", ""),
+                   "expires_at": time.time() + data.get("expires_in", 3600)}, f)
+    return True
 
 def _spotify_get(token, path):
     """Call Spotify Web API and return parsed JSON."""
@@ -304,7 +378,7 @@ class App(ctk.CTk):
         cfg = load_config()
         win = ctk.CTkToplevel(self)
         win.title("Spotify API 설정")
-        win.geometry("460x280")
+        win.geometry("460x340")
         win.resizable(False, False)
         win.grab_set()
 
@@ -355,12 +429,34 @@ class App(ctk.CTk):
             win.destroy()
 
         btn_frame = ctk.CTkFrame(win, fg_color="transparent")
-        btn_frame.pack(padx=24, pady=12, fill="x")
-        ctk.CTkButton(btn_frame, text="연결 테스트", width=120, height=36,
+        btn_frame.pack(padx=24, pady=(8, 4), fill="x")
+        ctk.CTkButton(btn_frame, text="연결 테스트", width=110, height=34,
                       fg_color="gray30", hover_color="gray40",
                       command=test_connection).pack(side="left")
-        ctk.CTkButton(btn_frame, text="저장", height=36,
+        ctk.CTkButton(btn_frame, text="저장", width=80, height=34,
                       command=save).pack(side="right")
+
+        def login():
+            cid = cid_entry.get().strip()
+            sec = sec_entry.get().strip()
+            if not cid or not sec:
+                test_lbl.configure(text="ID와 Secret을 먼저 저장하세요", text_color="gray")
+                return
+            cfg["spotify_client_id"] = cid
+            cfg["spotify_client_secret"] = sec
+            save_config(cfg)
+            test_lbl.configure(text="브라우저에서 로그인 후 돌아오세요...", text_color="gray60")
+            win.update_idletasks()
+            def _do():
+                ok = do_spotify_login(cid, sec)
+                win.after(0, lambda: test_lbl.configure(
+                    text="로그인 완료! 비공개 플레이리스트도 됩니다." if ok else "로그인 실패",
+                    text_color="#4CAF50" if ok else "#f44336"))
+            threading.Thread(target=_do, daemon=True).start()
+
+        ctk.CTkButton(win, text="🔑 Spotify 로그인 (비공개 플레이리스트용)", height=34,
+                      fg_color="#1DB954", hover_color="#1aa34a",
+                      command=login).pack(padx=24, pady=(0, 12), fill="x")
 
     def _get_urls(self):
         text = self.url_box.get("1.0", "end")
