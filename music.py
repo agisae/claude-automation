@@ -160,18 +160,18 @@ class DownloadRow(ctk.CTkFrame):
         short = title[:70] + "..." if len(title) > 70 else title
         self.name_lbl.configure(text=short)
 
-    def update(self, status, pct=None):
+    def set_status(self, status, pct=None):
         self.status_lbl.configure(text=status)
         if pct is not None:
             self.prog.set(pct)
 
     def done(self, ok, msg=""):
         if ok:
-            self.update("완료", 1.0)
+            self.set_status("완료", 1.0)
             self.status_lbl.configure(text_color="#4CAF50")
             self.prog.configure(progress_color="#4CAF50")
         else:
-            self.update(msg or "실패", 0)
+            self.set_status(msg or "실패", 0)
             self.status_lbl.configure(text_color="#f44336")
             self.prog.configure(progress_color="#f44336")
 
@@ -289,7 +289,8 @@ class App(ctk.CTk):
             pass
 
     def _pick_folder(self):
-        f = filedialog.askdirectory(initialdir=self.dir_ref[0])
+        init = self.dir_ref[0] if os.path.isdir(self.dir_ref[0]) else os.path.expanduser("~")
+        f = filedialog.askdirectory(initialdir=init)
         if f:
             self.dir_ref[0] = f
             self.folder_lbl.configure(text=f)
@@ -356,7 +357,6 @@ class App(ctk.CTk):
         workers = int(self.worker_var.get())
         fmt = self.fmt_var.get()
         quality = self.qual_var.get().replace("k", "")
-        save_dir = self.dir_ref[0]
         threading.Thread(target=self._run_all,
                          args=(urls, workers, fmt, quality, save_dir),
                          daemon=True).start()
@@ -376,7 +376,7 @@ class App(ctk.CTk):
         row = self._rows[idx]
         url = clean_url(url)
         source = detect_source(url)
-        self.after(0, row.update, "시작 중...", 0.02)
+        self.after(0, row.set_status, "시작 중...", 0.02)
 
         def hook(d):
             if d["status"] == "downloading":
@@ -385,9 +385,9 @@ class App(ctk.CTk):
                 pct = (done / total) if total else 0
                 spd = d.get("speed") or 0
                 s = f"{spd/1024/1024:.1f} MB/s" if spd else "..."
-                self.after(0, row.update, f"다운로드 중 {pct*100:.0f}% — {s}", pct)
+                self.after(0, row.set_status, f"다운로드 중 {pct*100:.0f}% — {s}", pct)
             elif d["status"] == "finished":
-                self.after(0, row.update, "변환 중...", 0.95)
+                self.after(0, row.set_status, "변환 중...", 0.95)
 
         os.makedirs(save_dir, exist_ok=True)
 
@@ -408,7 +408,7 @@ class App(ctk.CTk):
 
         try:
             if source == "spotify":
-                self.after(0, row.update, "Spotify 정보 가져오는 중...", 0.05)
+                self.after(0, row.set_status, "Spotify 정보 가져오는 중...", 0.05)
                 tracks, name = get_spotify_tracks(url)
                 if not tracks:
                     raise Exception("트랙 정보를 가져올 수 없습니다.")
@@ -416,11 +416,11 @@ class App(ctk.CTk):
                 self.after(0, row.set_title, f"{name}  ({count}곡)" if count > 1 else name)
                 for i, query in enumerate(tracks):
                     pct = 0.1 + (i / count * 0.85)
-                    self.after(0, row.update, f"[{i+1}/{count}] {query[:50]}", pct)
+                    self.after(0, row.set_status, f"[{i+1}/{count}] {query[:50]}", pct)
                     _run_ydl(opts, f"ytsearch1:{query}", timeout=180)
 
             else:
-                self.after(0, row.update, "정보 가져오는 중...", 0.05)
+                self.after(0, row.set_status, "정보 가져오는 중...", 0.05)
                 _run_ydl(opts, url, timeout=600)
 
             self.after(0, row.done, True)
