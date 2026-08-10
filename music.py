@@ -61,45 +61,52 @@ def spotify_url_type(url):
         return "album"
     return "track"
 
+def _oembed_track(url):
+    oembed = f"https://open.spotify.com/oembed?url={url}"
+    req = urllib.request.Request(oembed, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.loads(r.read())
+    title = data.get("title", "")
+    artist = data.get("author_name", "")
+    query = f"{artist} - {title}" if artist else title
+    return [query], title or "Spotify Track"
+
 def get_spotify_tracks(url):
     url_type = spotify_url_type(url)
     sp = get_spotify_client()
 
     if url_type == "track" or sp is None:
-        oembed = f"https://open.spotify.com/oembed?url={url}"
-        req = urllib.request.Request(oembed, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            data = json.loads(r.read())
-        title = data.get("title", "")
-        artist = data.get("author_name", "")
-        query = f"{artist} - {title}" if artist else title
-        return [query], title
+        return _oembed_track(url)
 
-    tracks = []
-    if url_type == "playlist":
-        playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
-        result = sp.playlist(playlist_id)
-        name = result["name"]
-        items = result["tracks"]["items"]
-        while result["tracks"].get("next"):
-            result["tracks"] = sp.next(result["tracks"])
-            items += result["tracks"]["items"]
-        for item in items:
-            t = item.get("track")
-            if t:
-                artists = ", ".join(a["name"] for a in t["artists"])
-                tracks.append(f"{artists} - {t['name']}")
+    try:
+        tracks = []
+        if url_type == "playlist":
+            playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
+            result = sp.playlist(playlist_id)
+            name = result["name"]
+            items = result["tracks"]["items"]
+            while result["tracks"].get("next"):
+                result["tracks"] = sp.next(result["tracks"])
+                items += result["tracks"]["items"]
+            for item in items:
+                t = item.get("track")
+                if t:
+                    artists = ", ".join(a["name"] for a in t["artists"])
+                    tracks.append(f"{artists} - {t['name']}")
 
-    elif url_type == "album":
-        album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
-        result = sp.album(album_id)
-        name = result["name"]
-        artist = result["artists"][0]["name"]
-        items = result["tracks"]["items"]
-        for t in items:
-            tracks.append(f"{artist} - {t['name']}")
+        elif url_type == "album":
+            album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
+            result = sp.album(album_id)
+            name = result["name"]
+            artist = result["artists"][0]["name"]
+            items = result["tracks"]["items"]
+            for t in items:
+                tracks.append(f"{artist} - {t['name']}")
 
-    return tracks, name
+        return tracks, name
+
+    except Exception:
+        return _oembed_track(url)
 
 
 class DownloadRow(ctk.CTkFrame):
