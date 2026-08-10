@@ -75,8 +75,11 @@ def get_spotify_tracks(url):
     url_type = spotify_url_type(url)
     sp = get_spotify_client()
 
-    if url_type == "track" or sp is None:
+    if url_type == "track":
         return _oembed_track(url)
+
+    if sp is None:
+        raise Exception("플레이리스트/앨범 다운로드는 Spotify API 키 필요\n⚙ Spotify 설정 버튼에서 키를 입력해 주세요.")
 
     try:
         tracks = []
@@ -105,8 +108,8 @@ def get_spotify_tracks(url):
 
         return tracks, name
 
-    except Exception:
-        return _oembed_track(url)
+    except Exception as e:
+        raise Exception(f"Spotify API 오류: {e}\n⚙ Spotify 설정에서 키를 확인해 주세요.")
 
 
 class DownloadRow(ctk.CTkFrame):
