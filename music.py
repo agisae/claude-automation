@@ -76,10 +76,17 @@ def _spotify_token():
                 with open(TOKEN_CACHE, "w") as f:
                     json.dump(cached, f)
                 return cached["access_token"]
-            except Exception:
-                pass
+            except Exception as e:
+                # Delete stale cache so next run doesn't get stuck trying to refresh
+                try:
+                    os.remove(TOKEN_CACHE)
+                except Exception:
+                    pass
+                raise Exception(
+                    f"Spotify 토큰이 만료되었습니다. 다시 로그인해 주세요.\n"
+                    f"⚙ Spotify 설정 → 🔑 Spotify 로그인\n오류: {e}")
 
-    # Fall back to Client Credentials for public content
+    # Fall back to Client Credentials (public playlists/albums only)
     try:
         data = _exchange_token(cid, secret, {"grant_type": "client_credentials"})
         return data["access_token"]
@@ -126,8 +133,19 @@ def _spotify_get(token, path):
     req = urllib.request.Request(
         f"https://api.spotify.com/v1/{path}",
         headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        if e.code == 401:
+            raise Exception(
+                f"Spotify 인증 실패 (401). 🔑 Spotify 로그인을 다시 해주세요.\n응답: {body}")
+        if e.code == 403:
+            raise Exception(
+                f"Spotify 접근 거부 (403). 비공개 플레이리스트는 🔑 Spotify 로그인이 필요합니다.\n"
+                f"⚙ Spotify 설정 → 🔑 Spotify 로그인\n응답: {body}")
+        raise Exception(f"Spotify {e.code}: {body}")
 
 def clean_url(url):
     """Normalize YouTube URL and strip tracking params that break yt-dlp."""
@@ -378,7 +396,7 @@ class App(ctk.CTk):
         cfg = load_config()
         win = ctk.CTkToplevel(self)
         win.title("Spotify API 설정")
-        win.geometry("460x340")
+        win.geometry("460x380")
         win.resizable(False, False)
         win.grab_set()
 
@@ -394,8 +412,31 @@ class App(ctk.CTk):
         sec_entry.insert(0, cfg.get("spotify_client_secret", ""))
         sec_entry.pack(padx=24)
 
+        # Show login status
+        import time as _time
+        login_status = "로그인 상태: 없음"
+        login_color = "gray60"
+        if os.path.exists(TOKEN_CACHE):
+            try:
+                with open(TOKEN_CACHE) as _f:
+                    _c = json.load(_f)
+                if _c.get("expires_at", 0) > _time.time():
+                    login_status = "✅ Spotify 로그인됨 (OAuth 토큰 유효)"
+                    login_color = "#4CAF50"
+                elif _c.get("refresh_token"):
+                    login_status = "⚠️ 로그인됨 (토큰 만료, 자동 갱신 시도)"
+                    login_color = "#FF9800"
+                else:
+                    login_status = "❌ 캐시 있음, 갱신 불가 — 다시 로그인 필요"
+                    login_color = "#f44336"
+            except Exception:
+                login_status = "❌ 캐시 손상 — 다시 로그인 필요"
+                login_color = "#f44336"
+        ctk.CTkLabel(win, text=login_status, font=ctk.CTkFont(size=11),
+                     text_color=login_color).pack(padx=24, pady=(8, 0), anchor="w")
+
         test_lbl = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
-        test_lbl.pack(padx=24, pady=(8, 0), anchor="w")
+        test_lbl.pack(padx=24, pady=(4, 0), anchor="w")
 
         def test_connection():
             cid = cid_entry.get().strip()
@@ -561,7 +602,10 @@ class App(ctk.CTk):
 
         except Exception as e:
             err = str(e)
-            self.after(0, row.done, False, err[:80] if err else "알 수 없는 오류")
+            short = err[:100] if err else "알 수 없는 오류"
+            self.after(0, row.done, False, short)
+            if source == "spotify" and len(err) > 50:
+                self.after(0, messagebox.showerror, "Spotify 오류", err)
 
 
 if __name__ == "__main__":
