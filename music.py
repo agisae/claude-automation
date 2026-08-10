@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from tkinter import filedialog, messagebox
 import yt_dlp
 import base64
+import urllib.error
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -29,8 +30,8 @@ def save_config(data):
 def _spotify_token():
     """Get Spotify access token via Client Credentials (no redirect URI needed)."""
     cfg = load_config()
-    cid = cfg.get("spotify_client_id", "")
-    secret = cfg.get("spotify_client_secret", "")
+    cid = cfg.get("spotify_client_id", "").strip()
+    secret = cfg.get("spotify_client_secret", "").strip()
     if not cid or not secret:
         return None
     creds = base64.b64encode(f"{cid}:{secret}".encode()).decode()
@@ -39,8 +40,12 @@ def _spotify_token():
         data=b"grant_type=client_credentials",
         headers={"Authorization": f"Basic {creds}",
                  "Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())["access_token"]
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())["access_token"]
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        raise Exception(f"Spotify 인증 실패 ({e.code}): {body}")
 
 def _spotify_get(token, path):
     """Call Spotify Web API and return parsed JSON."""
@@ -299,7 +304,7 @@ class App(ctk.CTk):
         cfg = load_config()
         win = ctk.CTkToplevel(self)
         win.title("Spotify API 설정")
-        win.geometry("460x220")
+        win.geometry("460x280")
         win.resizable(False, False)
         win.grab_set()
 
@@ -315,6 +320,33 @@ class App(ctk.CTk):
         sec_entry.insert(0, cfg.get("spotify_client_secret", ""))
         sec_entry.pack(padx=24)
 
+        test_lbl = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
+        test_lbl.pack(padx=24, pady=(8, 0), anchor="w")
+
+        def test_connection():
+            cid = cid_entry.get().strip()
+            sec = sec_entry.get().strip()
+            if not cid or not sec:
+                test_lbl.configure(text="ID와 Secret을 입력하세요", text_color="gray")
+                return
+            test_lbl.configure(text="테스트 중...", text_color="gray60")
+            win.update_idletasks()
+            try:
+                creds = base64.b64encode(f"{cid}:{sec}".encode()).decode()
+                req = urllib.request.Request(
+                    "https://accounts.spotify.com/api/token",
+                    data=b"grant_type=client_credentials",
+                    headers={"Authorization": f"Basic {creds}",
+                             "Content-Type": "application/x-www-form-urlencoded"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    json.loads(r.read())["access_token"]
+                test_lbl.configure(text="연결 성공!", text_color="#4CAF50")
+            except urllib.error.HTTPError as e:
+                body = e.read().decode(errors="ignore")
+                test_lbl.configure(text=f"실패 ({e.code}): {body[:60]}", text_color="#f44336")
+            except Exception as e:
+                test_lbl.configure(text=f"실패: {str(e)[:60]}", text_color="#f44336")
+
         def save():
             cfg["spotify_client_id"] = cid_entry.get().strip()
             cfg["spotify_client_secret"] = sec_entry.get().strip()
@@ -322,7 +354,13 @@ class App(ctk.CTk):
             messagebox.showinfo("저장됨", "Spotify API 키가 저장되었습니다!")
             win.destroy()
 
-        ctk.CTkButton(win, text="저장", height=36, command=save).pack(padx=24, pady=16, fill="x")
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(padx=24, pady=12, fill="x")
+        ctk.CTkButton(btn_frame, text="연결 테스트", width=120, height=36,
+                      fg_color="gray30", hover_color="gray40",
+                      command=test_connection).pack(side="left")
+        ctk.CTkButton(btn_frame, text="저장", height=36,
+                      command=save).pack(side="right")
 
     def _get_urls(self):
         text = self.url_box.get("1.0", "end")
