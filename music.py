@@ -99,10 +99,10 @@ def get_spotify_tracks(url):
         tracks = []
         if url_type == "playlist":
             playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
-            name = _spotify_get(token, f"playlists/{playlist_id}?fields=name")["name"]
+            name = _spotify_get(token, f"playlists/{playlist_id}")["name"]
             offset = 0
             while True:
-                page = _spotify_get(token, f"playlists/{playlist_id}/tracks?limit=100&offset={offset}&fields=items(track(name,artists(name))),next")
+                page = _spotify_get(token, f"playlists/{playlist_id}/tracks?limit=100&offset={offset}")
                 for item in page.get("items", []):
                     t = item.get("track")
                     if t and t.get("name"):
