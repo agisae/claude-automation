@@ -93,16 +93,20 @@ def _spotify_token():
     except Exception as e:
         raise Exception(str(e))
 
-def do_spotify_login(cid, secret):
-    """OAuth browser login — stores user token so private playlists work."""
+def build_auth_url(cid):
+    """OAuth 인증 URL 생성 (항상 로그인 화면 표시)."""
     params = urllib.parse.urlencode({
         "client_id": cid, "response_type": "code",
-        "redirect_uri": REDIRECT_URI, "scope": SPOTIFY_SCOPE})
-    auth_url = f"https://accounts.spotify.com/authorize?{params}"
+        "redirect_uri": REDIRECT_URI, "scope": SPOTIFY_SCOPE,
+        "show_dialog": "true"})
+    return f"https://accounts.spotify.com/authorize?{params}"
+
+def wait_for_oauth_code(on_ready=None):
+    """로컬 서버를 열어 Spotify OAuth 콜백 코드를 기다린다. code를 반환."""
     code_box = [None]
 
     class _Server(http.server.HTTPServer):
-        allow_reuse_address = True  # 이전 시도로 포트가 점유된 경우 재사용
+        allow_reuse_address = True
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -123,20 +127,25 @@ def do_spotify_login(cid, secret):
         def log_message(self, *args): pass
 
     server = _Server(("127.0.0.1", 8888), Handler)
-    webbrowser.open(auth_url)
+    if on_ready:
+        on_ready()
     server.serve_forever()
+    return code_box[0]
 
-    if not code_box[0]:
-        return False
+def finish_oauth(cid, secret, code):
+    """코드로 토큰 교환 후 저장. Spotify 계정명 반환."""
     import time
     data = _exchange_token(cid, secret, {
         "grant_type": "authorization_code",
-        "code": code_box[0], "redirect_uri": REDIRECT_URI})
+        "code": code, "redirect_uri": REDIRECT_URI})
+    access_token = data["access_token"]
     with open(TOKEN_CACHE, "w") as f:
-        json.dump({"access_token": data["access_token"],
+        json.dump({"access_token": access_token,
                    "refresh_token": data.get("refresh_token", ""),
                    "expires_at": time.time() + data.get("expires_in", 3600)}, f)
-    return True
+    # 토큰이 실제로 작동하는지 확인
+    me = _spotify_get(access_token, "me")
+    return me.get("display_name") or me.get("id") or "알 수 없음"
 
 def _spotify_get(token, path):
     """Call Spotify Web API and return parsed JSON."""
@@ -406,7 +415,7 @@ class App(ctk.CTk):
         cfg = load_config()
         win = ctk.CTkToplevel(self)
         win.title("Spotify API 설정")
-        win.geometry("460x380")
+        win.geometry("460x480")
         win.resizable(False, False)
         win.grab_set()
 
@@ -500,6 +509,33 @@ class App(ctk.CTk):
         ctk.CTkButton(btn_frame, text="저장", width=80, height=34,
                       command=save).pack(side="right")
 
+        url_box = ctk.CTkEntry(win, width=410, height=28, font=ctk.CTkFont(size=10),
+                               placeholder_text="로그인 버튼을 누르면 인증 URL이 여기에 표시됩니다")
+        url_box.pack(padx=24, pady=(4, 0))
+
+        def copy_url():
+            txt = url_box.get()
+            if txt:
+                win.clipboard_clear()
+                win.clipboard_append(txt)
+                test_lbl.configure(text="URL 복사됨 — 브라우저 주소창에 붙여넣어 여세요", text_color="gray60")
+
+        def open_url():
+            txt = url_box.get()
+            if txt:
+                opened = webbrowser.open(txt)
+                if not opened:
+                    test_lbl.configure(text="브라우저 자동 열기 실패 — URL을 직접 복사해 여세요", text_color="#FF9800")
+
+        url_btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        url_btn_row.pack(padx=24, pady=(2, 0), fill="x")
+        ctk.CTkButton(url_btn_row, text="URL 복사", width=90, height=26,
+                      fg_color="gray30", hover_color="gray40",
+                      font=ctk.CTkFont(size=11), command=copy_url).pack(side="left")
+        ctk.CTkButton(url_btn_row, text="브라우저로 열기", width=110, height=26,
+                      fg_color="gray30", hover_color="gray40",
+                      font=ctk.CTkFont(size=11), command=open_url).pack(side="left", padx=(6, 0))
+
         def login():
             cid = cid_entry.get().strip()
             sec = sec_entry.get().strip()
@@ -509,22 +545,31 @@ class App(ctk.CTk):
             cfg["spotify_client_id"] = cid
             cfg["spotify_client_secret"] = sec
             save_config(cfg)
-            test_lbl.configure(text="브라우저에서 로그인 후 돌아오세요...", text_color="gray60")
+
+            auth_url = build_auth_url(cid)
+            url_box.delete(0, "end")
+            url_box.insert(0, auth_url)
+            test_lbl.configure(text="대기 중 — 브라우저에서 로그인 후 이 창으로 돌아오세요", text_color="gray60")
             win.update_idletasks()
+
             def _do():
                 try:
-                    ok = do_spotify_login(cid, sec)
-                    msg = "로그인 완료! 비공개 플레이리스트도 됩니다." if ok else "로그인 실패 — 브라우저에서 승인했는지 확인해 주세요."
-                    col = "#4CAF50" if ok else "#f44336"
+                    webbrowser.open(auth_url)
+                    code = wait_for_oauth_code()
+                    if not code:
+                        raise Exception("인증 코드를 받지 못했습니다. 브라우저에서 승인했는지 확인해 주세요.")
+                    name = finish_oauth(cid, sec, code)
+                    msg = f"✅ 로그인 완료! ({name})"
+                    col = "#4CAF50"
                 except Exception as e:
                     msg = f"오류: {e}"
                     col = "#f44336"
                 win.after(0, lambda: test_lbl.configure(text=msg, text_color=col))
             threading.Thread(target=_do, daemon=True).start()
 
-        ctk.CTkButton(win, text="🔑 Spotify 로그인 (비공개 플레이리스트용)", height=34,
+        ctk.CTkButton(win, text="🔑 Spotify 로그인", height=34,
                       fg_color="#1DB954", hover_color="#1aa34a",
-                      command=login).pack(padx=24, pady=(0, 12), fill="x")
+                      command=login).pack(padx=24, pady=(8, 4), fill="x")
 
     def _get_urls(self):
         text = self.url_box.get("1.0", "end")
