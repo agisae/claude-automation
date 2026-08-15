@@ -278,10 +278,10 @@ def _fetch_via_embed(url_type, item_id):
         raise Exception("임베드에서 트랙을 찾을 수 없습니다")
 
     # Paginate remaining tracks using the page-embedded token (bypasses dev app quota)
-    total = entity.get("trackCount") or entity.get("totalTracks") or len(tracks)
-    if embed_token and url_type == "playlist" and len(tracks) < total:
+    # Don't rely on a total-count field — just keep going while API returns a next link
+    if embed_token and url_type == "playlist":
         offset = len(tracks)
-        while offset < total:
+        while True:
             try:
                 page = _spotify_get(embed_token,
                     f"playlists/{item_id}/tracks?limit=100&offset={offset}")
@@ -920,15 +920,35 @@ class App(ctk.CTk):
 
         sp_history_file = os.path.join(save_dir, ".spotify_downloaded")
 
-        def _already_done(query):
-            """쿼리가 이전에 성공적으로 다운됐으면 True."""
-            if not os.path.exists(sp_history_file):
+        def _file_exists_in_dir(query):
+            """저장 폴더에서 쿼리 키워드가 포함된 음악 파일이 있는지 확인."""
+            if not os.path.isdir(save_dir):
+                return False
+            normalized = re.sub(r"[^\w\s]", " ", query.lower()).strip()
+            words = [w for w in normalized.split() if len(w) > 2][:4]
+            if not words:
                 return False
             try:
-                with open(sp_history_file, encoding="utf-8") as _f:
-                    return query.strip().lower() in {l.strip().lower() for l in _f}
+                for fname in os.listdir(save_dir):
+                    if not fname.lower().endswith(("." + fmt,)):
+                        continue
+                    fname_norm = re.sub(r"[^\w\s]", " ", fname.lower())
+                    if sum(1 for w in words if w in fname_norm) >= min(len(words), 2):
+                        return True
             except Exception:
-                return False
+                pass
+            return False
+
+        def _already_done(query):
+            """히스토리 파일 또는 폴더 스캔으로 이미 다운됐는지 확인."""
+            if os.path.exists(sp_history_file):
+                try:
+                    with open(sp_history_file, encoding="utf-8") as _f:
+                        if query.strip().lower() in {l.strip().lower() for l in _f}:
+                            return True
+                except Exception:
+                    pass
+            return _file_exists_in_dir(query)
 
         def _mark_done(query):
             try:
