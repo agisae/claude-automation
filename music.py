@@ -242,8 +242,17 @@ def _fetch_via_embed(url_type, item_id):
     data = json.loads(m.group(1))
     page_props = data["props"]["pageProps"]
 
-    # Access token embedded in the page — not from our developer app quota
-    embed_token = page_props.get("accessToken")
+    # Find access token — location varies by Spotify embed page version
+    embed_token = (
+        page_props.get("accessToken") or
+        page_props.get("serverAccessToken") or
+        data.get("props", {}).get("accessToken")
+    )
+    if not embed_token:
+        tm = re.search(r'"accessToken"\s*:\s*"([^"]+)"', html)
+        if tm:
+            embed_token = tm.group(1)
+    print(f"[Spotify] embed token: {'있음' if embed_token else '없음'}")
 
     try:
         entity = page_props["state"]["data"]["entity"]
@@ -277,15 +286,18 @@ def _fetch_via_embed(url_type, item_id):
     if not tracks:
         raise Exception("임베드에서 트랙을 찾을 수 없습니다")
 
+    print(f"[Spotify] 임베드 첫 배치: {len(tracks)}곡")
+
     # Paginate remaining tracks using the page-embedded token (bypasses dev app quota)
-    # Don't rely on a total-count field — just keep going while API returns a next link
     if embed_token and url_type == "playlist":
         offset = len(tracks)
         while True:
             try:
                 page = _spotify_get(embed_token,
                     f"playlists/{item_id}/tracks?limit=100&offset={offset}")
-            except Exception:
+                print(f"[Spotify] offset={offset} → {len(page.get('items', []))}곡, next={bool(page.get('next'))}")
+            except Exception as e:
+                print(f"[Spotify] 페이지네이션 실패 offset={offset}: {e}")
                 break
             added = 0
             for item in page.get("items", []):
@@ -297,7 +309,10 @@ def _fetch_via_embed(url_type, item_id):
             if not page.get("next") or added == 0:
                 break
             offset += 100
+    elif url_type == "playlist":
+        print("[Spotify] embed token 없음 — 페이지네이션 불가")
 
+    print(f"[Spotify] 최종 트랙 수: {len(tracks)}")
     return tracks, name
 
 def _fetch_via_ytdlp(url):
