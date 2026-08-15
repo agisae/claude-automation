@@ -378,7 +378,17 @@ def get_spotify_tracks(url):
 
     errors = []
 
-    # Method 1: 임베드 페이지 스크래핑 (API 키 / 개발자 앱 제한 없음)
+    # Method 1: yt-dlp 내장 Spotify 추출기 (플레이리스트 전체 가져옴)
+    try:
+        result = _fetch_via_ytdlp(url)
+        if result and result[0]:
+            print(f"[Spotify] yt-dlp 방식 성공: {len(result[0])}곡")
+            return result
+    except Exception as e:
+        print(f"[Spotify] yt-dlp 실패: {e}")
+        errors.append(f"yt-dlp: {e}")
+
+    # Method 2: 임베드 페이지 스크래핑 (100곡 제한 가능)
     if item_id:
         try:
             result = _fetch_via_embed(url_type, item_id)
@@ -387,15 +397,6 @@ def get_spotify_tracks(url):
         except Exception as e:
             print(f"[Spotify] embed 실패: {e}")
             errors.append(f"embed: {e}")
-
-    # Method 2: yt-dlp 내장 Spotify 추출기
-    try:
-        result = _fetch_via_ytdlp(url)
-        print(f"[Spotify] yt-dlp 방식 성공: {len(result[0])}곡")
-        return result
-    except Exception as e:
-        print(f"[Spotify] yt-dlp 실패: {e}")
-        errors.append(f"yt-dlp: {e}")
 
     # Method 3: OAuth API (개발자 앱 Extended Quota Mode 필요)
     tokens_to_try = []
