@@ -207,13 +207,12 @@ def _oembed_track(url):
     return [query], title or "Spotify Track"
 
 def _fetch_playlist_tracks(token, playlist_id):
-    name = _spotify_get(token, f"playlists/{playlist_id}?fields=name")["name"]
+    name = _spotify_get(token, f"playlists/{playlist_id}")["name"]
     tracks = []
     offset = 0
     while True:
         page = _spotify_get(token,
-            f"playlists/{playlist_id}/tracks?limit=100&offset={offset}"
-            f"&fields=next,items(track(name,artists(name)))")
+            f"playlists/{playlist_id}/tracks?limit=100&offset={offset}")
         for item in page.get("items", []):
             t = item.get("track")
             if t and t.get("name"):
@@ -554,6 +553,7 @@ class App(ctk.CTk):
                 cid = cid_entry.get().strip()
                 sec = sec_entry.get().strip()
                 add("=== Spotify 진단 시작 ===\n")
+                TEST_PL = "37i9dQZF1DXcBWIGoYBM5M"  # Spotify 공식 차트
 
                 # 1. 익명 토큰
                 add("[1] 익명 토큰 (get_access_token)...")
@@ -567,9 +567,8 @@ class App(ctk.CTk):
                 # 2. 익명 토큰으로 공개 플레이리스트 접근
                 if anon:
                     add("[2] 익명 토큰으로 공개 플레이리스트 접근...")
-                    TEST_PL = "37i9dQZF1DXcBWIGoYBM5M"  # Spotify 공식 차트
                     try:
-                        data = _spotify_get(anon, f"playlists/{TEST_PL}?fields=name")
+                        data = _spotify_get(anon, f"playlists/{TEST_PL}")
                         add(f"    OK: '{data.get('name')}'\n")
                     except Exception as e:
                         add(f"    FAIL: {e}\n")
@@ -606,7 +605,7 @@ class App(ctk.CTk):
 
                     add("[5] OAuth 토큰으로 공개 플레이리스트 접근...")
                     try:
-                        data = _spotify_get(oauth_token, f"playlists/{TEST_PL}?fields=name")
+                        data = _spotify_get(oauth_token, f"playlists/{TEST_PL}")
                         add(f"    OK: '{data.get('name')}'\n")
                     except Exception as e:
                         add(f"    FAIL: {e}\n")
@@ -620,7 +619,7 @@ class App(ctk.CTk):
                         add(f"    OK: {cc_token[:40]}...\n")
                         add("[7] CC 토큰으로 공개 플레이리스트 접근...")
                         try:
-                            data = _spotify_get(cc_token, f"playlists/{TEST_PL}?fields=name")
+                            data = _spotify_get(cc_token, f"playlists/{TEST_PL}")
                             add(f"    OK: '{data.get('name')}'\n")
                         except Exception as e:
                             add(f"    FAIL: {e}\n")
