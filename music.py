@@ -147,6 +147,18 @@ def finish_oauth(cid, secret, code):
     me = _spotify_get(access_token, "me")
     return me.get("display_name") or me.get("id") or "알 수 없음"
 
+def _get_anon_token():
+    """Spotify 웹플레이어 익명 토큰 — 공개 콘텐츠는 API 키 없이 접근 가능."""
+    req = urllib.request.Request(
+        "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.loads(r.read())
+    token = data.get("accessToken")
+    if not token:
+        raise Exception("Spotify 익명 토큰을 가져올 수 없습니다.")
+    return token
+
 def _spotify_get(token, path):
     """Call Spotify Web API and return parsed JSON."""
     req = urllib.request.Request(
@@ -157,13 +169,6 @@ def _spotify_get(token, path):
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="ignore")
-        if e.code == 401:
-            raise Exception(
-                f"Spotify 인증 실패 (401). 🔑 Spotify 로그인을 다시 해주세요.\n응답: {body}")
-        if e.code == 403:
-            raise Exception(
-                f"Spotify 접근 거부 (403). 비공개 플레이리스트는 🔑 Spotify 로그인이 필요합니다.\n"
-                f"⚙ Spotify 설정 → 🔑 Spotify 로그인\n응답: {body}")
         raise Exception(f"Spotify {e.code}: {body}")
 
 def clean_url(url):
@@ -201,45 +206,68 @@ def _oembed_track(url):
     query = f"{artist} - {title}" if artist else title
     return [query], title or "Spotify Track"
 
+def _fetch_playlist_tracks(token, playlist_id):
+    name = _spotify_get(token, f"playlists/{playlist_id}?fields=name")["name"]
+    tracks = []
+    offset = 0
+    while True:
+        page = _spotify_get(token,
+            f"playlists/{playlist_id}/tracks?limit=100&offset={offset}"
+            f"&fields=next,items(track(name,artists(name)))")
+        for item in page.get("items", []):
+            t = item.get("track")
+            if t and t.get("name"):
+                artists = ", ".join(a["name"] for a in t.get("artists", []))
+                tracks.append(f"{artists} - {t['name']}" if artists else t["name"])
+        if not page.get("next"):
+            break
+        offset += 100
+    return tracks, name
+
 def get_spotify_tracks(url):
     url_type = spotify_url_type(url)
 
     if url_type == "track":
         return _oembed_track(url)
 
-    token = _spotify_token()
-    if token is None:
-        raise Exception("플레이리스트/앨범 다운로드는 Spotify API 키 필요\n⚙ Spotify 설정 버튼에서 키를 입력해 주세요.")
-
+    # 토큰 우선순위: 1) 캐시된 OAuth, 2) 익명 웹플레이어 토큰
+    tokens_to_try = []
     try:
-        tracks = []
-        if url_type == "playlist":
-            playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
-            name = _spotify_get(token, f"playlists/{playlist_id}")["name"]
-            offset = 0
-            while True:
-                page = _spotify_get(token, f"playlists/{playlist_id}/tracks?limit=100&offset={offset}")
-                for item in page.get("items", []):
-                    t = item.get("track")
-                    if t and t.get("name"):
-                        artists = ", ".join(a["name"] for a in t["artists"])
-                        tracks.append(f"{artists} - {t['name']}")
-                if not page.get("next"):
-                    break
-                offset += 100
+        t = _spotify_token()
+        if t:
+            tokens_to_try.append(("oauth", t))
+    except Exception:
+        pass
+    try:
+        tokens_to_try.append(("anon", _get_anon_token()))
+    except Exception:
+        pass
 
-        elif url_type == "album":
-            album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
-            data = _spotify_get(token, f"albums/{album_id}")
-            name = data["name"]
-            artist = data["artists"][0]["name"]
-            for t in data["tracks"]["items"]:
-                tracks.append(f"{artist} - {t['name']}")
+    if not tokens_to_try:
+        raise Exception("Spotify 토큰을 가져올 수 없습니다.\n⚙ Spotify 설정에서 키를 확인하거나 네트워크를 확인해 주세요.")
 
-        return tracks, name
+    last_err = None
+    for token_type, token in tokens_to_try:
+        try:
+            tracks = []
+            if url_type == "playlist":
+                playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
+                return _fetch_playlist_tracks(token, playlist_id)
 
-    except Exception as e:
-        raise Exception(f"Spotify API 오류: {e}\n⚙ Spotify 설정에서 키를 확인해 주세요.")
+            elif url_type == "album":
+                album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
+                data = _spotify_get(token, f"albums/{album_id}")
+                name = data["name"]
+                artist = data["artists"][0]["name"]
+                for t in data["tracks"]["items"]:
+                    tracks.append(f"{artist} - {t['name']}")
+                return tracks, name
+
+        except Exception as e:
+            last_err = e
+            continue  # 다음 토큰으로 재시도
+
+    raise Exception(f"Spotify 접근 실패: {last_err}\n비공개 플레이리스트는 ⚙ 설정 → 🔑 로그인이 필요합니다.")
 
 
 class DownloadRow(ctk.CTkFrame):
