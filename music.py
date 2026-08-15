@@ -101,6 +101,9 @@ def do_spotify_login(cid, secret):
     auth_url = f"https://accounts.spotify.com/authorize?{params}"
     code_box = [None]
 
+    class _Server(http.server.HTTPServer):
+        allow_reuse_address = True  # 이전 시도로 포트가 점유된 경우 재사용
+
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             p = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -115,12 +118,11 @@ def do_spotify_login(cid, secret):
                 self.wfile.write(body_bytes)
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
             else:
-                # 파비콘 등 다른 요청은 무시하고 서버 유지
                 self.send_response(204)
                 self.end_headers()
         def log_message(self, *args): pass
 
-    server = http.server.HTTPServer(("127.0.0.1", 8888), Handler)
+    server = _Server(("127.0.0.1", 8888), Handler)
     webbrowser.open(auth_url)
     server.serve_forever()
 
@@ -510,10 +512,14 @@ class App(ctk.CTk):
             test_lbl.configure(text="브라우저에서 로그인 후 돌아오세요...", text_color="gray60")
             win.update_idletasks()
             def _do():
-                ok = do_spotify_login(cid, sec)
-                win.after(0, lambda: test_lbl.configure(
-                    text="로그인 완료! 비공개 플레이리스트도 됩니다." if ok else "로그인 실패",
-                    text_color="#4CAF50" if ok else "#f44336"))
+                try:
+                    ok = do_spotify_login(cid, sec)
+                    msg = "로그인 완료! 비공개 플레이리스트도 됩니다." if ok else "로그인 실패 — 브라우저에서 승인했는지 확인해 주세요."
+                    col = "#4CAF50" if ok else "#f44336"
+                except Exception as e:
+                    msg = f"오류: {e}"
+                    col = "#f44336"
+                win.after(0, lambda: test_lbl.configure(text=msg, text_color=col))
             threading.Thread(target=_do, daemon=True).start()
 
         ctk.CTkButton(win, text="🔑 Spotify 로그인 (비공개 플레이리스트용)", height=34,
