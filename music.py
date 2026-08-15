@@ -288,47 +288,78 @@ def _fetch_via_embed(url_type, item_id):
 
     print(f"[Spotify] 임베드 첫 배치: {len(tracks)}곡")
 
-    # Paginate with OAuth or CC token (/tracks sub-endpoint, not root playlist endpoint)
-    if url_type == "playlist":
-        pagination_token = None
-        # Try OAuth cache first, then client credentials
-        for getter in (_spotify_token, lambda: _exchange_token(
-                load_config().get("spotify_client_id",""),
-                load_config().get("spotify_client_secret",""),
-                {"grant_type": "client_credentials"})["access_token"]):
-            try:
-                t = getter()
-                if t:
-                    pagination_token = t
-                    break
-            except Exception:
-                pass
-
-        if pagination_token:
-            offset = len(tracks)
-            while True:
+    # Paginate using embed token with retry on 429 rate limit
+    if embed_token and url_type == "playlist":
+        import time as _time
+        offset = len(tracks)
+        while True:
+            page = None
+            for attempt in range(4):
                 try:
-                    page = _spotify_get(pagination_token,
+                    if attempt > 0:
+                        wait = 10 * attempt
+                        print(f"[Spotify] 429 대기 {wait}초...")
+                        _time.sleep(wait)
+                    page = _spotify_get(embed_token,
                         f"playlists/{item_id}/tracks?limit=100&offset={offset}")
                     print(f"[Spotify] offset={offset} → {len(page.get('items', []))}곡")
+                    break
                 except Exception as e:
+                    if "429" in str(e) and attempt < 3:
+                        continue
                     print(f"[Spotify] 페이지네이션 실패 offset={offset}: {e}")
+                    page = None
                     break
-                added = 0
-                for item in page.get("items", []):
-                    t = item.get("track")
-                    if t and t.get("name"):
-                        artists = ", ".join(a["name"] for a in t.get("artists", []))
-                        tracks.append(f"{artists} - {t['name']}" if artists else t["name"])
-                        added += 1
-                if not page.get("next") or added == 0:
-                    break
-                offset += 100
-        else:
-            print("[Spotify] 페이지네이션 토큰 없음")
+            if page is None:
+                break
+            added = 0
+            for item in page.get("items", []):
+                t = item.get("track")
+                if t and t.get("name"):
+                    artists = ", ".join(a["name"] for a in t.get("artists", []))
+                    tracks.append(f"{artists} - {t['name']}" if artists else t["name"])
+                    added += 1
+            if not page.get("next") or added == 0:
+                break
+            offset += 100
 
     print(f"[Spotify] 최종 트랙 수: {len(tracks)}")
     return tracks, name
+
+def _fetch_via_spotdl(url):
+    """spotdl로 전체 트랙 목록 가져오기 (pip install spotdl 필요)."""
+    import subprocess
+    import tempfile
+
+    check = subprocess.run(["spotdl", "--version"], capture_output=True)
+    if check.returncode != 0:
+        raise Exception("spotdl 미설치 — pip install spotdl 실행 후 재시도")
+
+    with tempfile.NamedTemporaryFile(suffix=".spotdl", delete=False, mode="w") as tmp:
+        tmp_path = tmp.name
+    try:
+        result = subprocess.run(
+            ["spotdl", "save", url, "--save-file", tmp_path],
+            capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
+        if result.returncode != 0:
+            raise Exception((result.stderr or result.stdout).strip()[:300] or "spotdl 실패")
+        with open(tmp_path, encoding="utf-8") as f:
+            songs = json.load(f)
+        if not songs:
+            raise Exception("spotdl: 트랙 없음")
+        tracks = []
+        for s in songs:
+            artist = s.get("artist") or ""
+            name = s.get("name") or ""
+            if name:
+                tracks.append(f"{artist} - {name}" if artist else name)
+        pl_name = songs[0].get("album_name") or "Spotify 플레이리스트"
+        return tracks, pl_name
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 def _fetch_via_ytdlp(url):
     """yt-dlp 내장 Spotify 추출기로 트랙 목록 가져오기."""
@@ -378,17 +409,17 @@ def get_spotify_tracks(url):
 
     errors = []
 
-    # Method 1: yt-dlp 내장 Spotify 추출기 (플레이리스트 전체 가져옴)
+    # Method 1: spotdl (pip install spotdl — 개발자 앱 제한 없이 전체 가져옴)
     try:
-        result = _fetch_via_ytdlp(url)
+        result = _fetch_via_spotdl(url)
         if result and result[0]:
-            print(f"[Spotify] yt-dlp 방식 성공: {len(result[0])}곡")
+            print(f"[Spotify] spotdl 방식 성공: {len(result[0])}곡")
             return result
     except Exception as e:
-        print(f"[Spotify] yt-dlp 실패: {e}")
-        errors.append(f"yt-dlp: {e}")
+        print(f"[Spotify] spotdl 실패: {e}")
+        errors.append(f"spotdl: {e}")
 
-    # Method 2: 임베드 페이지 스크래핑 (100곡 제한 가능)
+    # Method 2: 임베드 페이지 스크래핑 (100곡, 429 재시도 포함)
     if item_id:
         try:
             result = _fetch_via_embed(url_type, item_id)
