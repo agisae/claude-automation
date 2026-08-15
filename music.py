@@ -224,7 +224,8 @@ def _fetch_playlist_tracks(token, playlist_id):
     return tracks, name
 
 def _fetch_via_embed(url_type, item_id):
-    """Spotify 임베드 페이지에서 트랙 목록을 스크래핑 (API 키 불필요)."""
+    """Spotify 임베드 페이지에서 트랙 목록을 스크래핑 (API 키 불필요).
+    페이지에 포함된 access token으로 100곡 초과 플레이리스트도 전부 가져온다."""
     embed_url = f"https://open.spotify.com/embed/{url_type}/{item_id}"
     req = urllib.request.Request(embed_url, headers={
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -239,10 +240,13 @@ def _fetch_via_embed(url_type, item_id):
         raise Exception("임베드 페이지에서 __NEXT_DATA__ 없음")
 
     data = json.loads(m.group(1))
+    page_props = data["props"]["pageProps"]
 
-    # Navigate to entity — path may vary by page version
+    # Access token embedded in the page — not from our developer app quota
+    embed_token = page_props.get("accessToken")
+
     try:
-        entity = data["props"]["pageProps"]["state"]["data"]["entity"]
+        entity = page_props["state"]["data"]["entity"]
     except (KeyError, TypeError):
         raise Exception("임베드 데이터 구조가 예상과 다릅니다")
 
@@ -272,6 +276,27 @@ def _fetch_via_embed(url_type, item_id):
 
     if not tracks:
         raise Exception("임베드에서 트랙을 찾을 수 없습니다")
+
+    # Paginate remaining tracks using the page-embedded token (bypasses dev app quota)
+    total = entity.get("trackCount") or entity.get("totalTracks") or len(tracks)
+    if embed_token and url_type == "playlist" and len(tracks) < total:
+        offset = len(tracks)
+        while offset < total:
+            try:
+                page = _spotify_get(embed_token,
+                    f"playlists/{item_id}/tracks?limit=100&offset={offset}")
+            except Exception:
+                break
+            added = 0
+            for item in page.get("items", []):
+                t = item.get("track")
+                if t and t.get("name"):
+                    artists = ", ".join(a["name"] for a in t.get("artists", []))
+                    tracks.append(f"{artists} - {t['name']}" if artists else t["name"])
+                    added += 1
+            if not page.get("next") or added == 0:
+                break
+            offset += 100
 
     return tracks, name
 
