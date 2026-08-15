@@ -537,6 +537,105 @@ class App(ctk.CTk):
         ctk.CTkButton(btn_frame, text="저장", width=80, height=34,
                       command=save).pack(side="right")
 
+        def run_diagnostics():
+            diag_win = ctk.CTkToplevel(win)
+            diag_win.title("Spotify 진단")
+            diag_win.geometry("560x420")
+            diag_win.grab_set()
+            log = ctk.CTkTextbox(diag_win, font=ctk.CTkFont(family="Courier", size=11))
+            log.pack(fill="both", expand=True, padx=12, pady=12)
+
+            def add(line):
+                log.insert("end", line + "\n")
+                log.see("end")
+                diag_win.update_idletasks()
+
+            def _run():
+                cid = cid_entry.get().strip()
+                sec = sec_entry.get().strip()
+                add("=== Spotify 진단 시작 ===\n")
+
+                # 1. 익명 토큰
+                add("[1] 익명 토큰 (get_access_token)...")
+                try:
+                    anon = _get_anon_token()
+                    add(f"    OK: {anon[:40]}...\n")
+                except Exception as e:
+                    add(f"    FAIL: {e}\n")
+                    anon = None
+
+                # 2. 익명 토큰으로 공개 플레이리스트 접근
+                if anon:
+                    add("[2] 익명 토큰으로 공개 플레이리스트 접근...")
+                    TEST_PL = "37i9dQZF1DXcBWIGoYBM5M"  # Spotify 공식 차트
+                    try:
+                        data = _spotify_get(anon, f"playlists/{TEST_PL}?fields=name")
+                        add(f"    OK: '{data.get('name')}'\n")
+                    except Exception as e:
+                        add(f"    FAIL: {e}\n")
+
+                # 3. OAuth 캐시 확인
+                add("[3] OAuth 캐시 확인...")
+                import time as _t
+                oauth_token = None
+                if os.path.exists(TOKEN_CACHE):
+                    try:
+                        with open(TOKEN_CACHE) as f:
+                            cached = json.load(f)
+                        exp = cached.get("expires_at", 0)
+                        remaining = int(exp - _t.time())
+                        add(f"    캐시 있음 — 만료까지 {remaining}초")
+                        if remaining > 0:
+                            oauth_token = cached["access_token"]
+                            add(f"    토큰: {oauth_token[:40]}...\n")
+                        else:
+                            add("    토큰 만료됨\n")
+                    except Exception as e:
+                        add(f"    캐시 읽기 오류: {e}\n")
+                else:
+                    add("    캐시 없음 (로그인 필요)\n")
+
+                # 4. OAuth 토큰으로 /me 접근
+                if oauth_token:
+                    add("[4] OAuth 토큰으로 /me 접근...")
+                    try:
+                        me = _spotify_get(oauth_token, "me")
+                        add(f"    OK: {me.get('display_name') or me.get('id')}\n")
+                    except Exception as e:
+                        add(f"    FAIL: {e}\n")
+
+                    add("[5] OAuth 토큰으로 공개 플레이리스트 접근...")
+                    try:
+                        data = _spotify_get(oauth_token, f"playlists/{TEST_PL}?fields=name")
+                        add(f"    OK: '{data.get('name')}'\n")
+                    except Exception as e:
+                        add(f"    FAIL: {e}\n")
+
+                # 5. Client Credentials
+                if cid and sec:
+                    add("[6] Client Credentials 토큰...")
+                    try:
+                        cc_data = _exchange_token(cid, sec, {"grant_type": "client_credentials"})
+                        cc_token = cc_data["access_token"]
+                        add(f"    OK: {cc_token[:40]}...\n")
+                        add("[7] CC 토큰으로 공개 플레이리스트 접근...")
+                        try:
+                            data = _spotify_get(cc_token, f"playlists/{TEST_PL}?fields=name")
+                            add(f"    OK: '{data.get('name')}'\n")
+                        except Exception as e:
+                            add(f"    FAIL: {e}\n")
+                    except Exception as e:
+                        add(f"    FAIL: {e}\n")
+
+                add("=== 진단 완료 ===")
+
+            threading.Thread(target=_run, daemon=True).start()
+
+        ctk.CTkButton(win, text="🔍 진단 실행", height=30,
+                      fg_color="gray25", hover_color="gray35",
+                      font=ctk.CTkFont(size=12),
+                      command=run_diagnostics).pack(padx=24, pady=(0, 4), fill="x")
+
         url_box = ctk.CTkEntry(win, width=410, height=28, font=ctk.CTkFont(size=10),
                                placeholder_text="로그인 버튼을 누르면 인증 URL이 여기에 표시됩니다")
         url_box.pack(padx=24, pady=(4, 0))
