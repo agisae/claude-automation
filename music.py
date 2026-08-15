@@ -914,7 +914,28 @@ class App(ctk.CTk):
             "quiet": True, "no_warnings": True,
             "windowsfilenames": True,
             "extractor_args": {"youtube": {"player_client": ["android"]}},
+            "nooverwrites": True,
+            "download_archive": os.path.join(save_dir, ".ytdl_archive"),
         }
+
+        sp_history_file = os.path.join(save_dir, ".spotify_downloaded")
+
+        def _already_done(query):
+            """쿼리가 이전에 성공적으로 다운됐으면 True."""
+            if not os.path.exists(sp_history_file):
+                return False
+            try:
+                with open(sp_history_file, encoding="utf-8") as _f:
+                    return query.strip().lower() in {l.strip().lower() for l in _f}
+            except Exception:
+                return False
+
+        def _mark_done(query):
+            try:
+                with open(sp_history_file, "a", encoding="utf-8") as _f:
+                    _f.write(query.strip() + "\n")
+            except Exception:
+                pass
 
         try:
             if source == "spotify":
@@ -924,16 +945,29 @@ class App(ctk.CTk):
                     raise Exception("트랙 정보를 가져올 수 없습니다.")
                 count = len(tracks)
                 self.after(0, row.set_title, f"{name}  ({count}곡)" if count > 1 else name)
+                skipped = 0
                 for i, query in enumerate(tracks):
                     pct = 0.1 + (i / count * 0.85)
+                    if _already_done(query):
+                        skipped += 1
+                        self.after(0, row.set_status,
+                            f"[{i+1}/{count}] 스킵 (이미 다운됨): {query[:40]}", pct)
+                        continue
                     self.after(0, row.set_status, f"[{i+1}/{count}] {query[:50]}", pct)
                     _run_ydl(opts, f"ytsearch1:{query}", timeout=180)
+                    _mark_done(query)
 
             else:
                 self.after(0, row.set_status, "정보 가져오는 중...", 0.05)
                 _run_ydl(opts, url, timeout=600)
 
-            self.after(0, row.done, True)
+            if source == "spotify" and skipped:
+                self.after(0, row.done, True)
+                self.after(0, row.set_status,
+                    f"완료 ({count - skipped}곡 다운 / {skipped}곡 스킵)", 1.0)
+                self.after(0, row.status_lbl.configure, {"text_color": "#4CAF50"})
+            else:
+                self.after(0, row.done, True)
 
         except Exception as e:
             err = str(e)
