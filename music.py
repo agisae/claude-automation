@@ -247,24 +247,27 @@ def get_spotify_tracks(url):
 
     last_err = None
     for token_type, token in tokens_to_try:
+        print(f"[Spotify] {token_type} 토큰으로 시도 중... ({url_type})")
         try:
-            tracks = []
             if url_type == "playlist":
                 playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
-                return _fetch_playlist_tracks(token, playlist_id)
+                print(f"[Spotify] 플레이리스트 ID: {playlist_id}")
+                result = _fetch_playlist_tracks(token, playlist_id)
+                print(f"[Spotify] 성공: {len(result[0])}곡")
+                return result
 
             elif url_type == "album":
                 album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
                 data = _spotify_get(token, f"albums/{album_id}")
                 name = data["name"]
                 artist = data["artists"][0]["name"]
-                for t in data["tracks"]["items"]:
-                    tracks.append(f"{artist} - {t['name']}")
+                tracks = [f"{artist} - {t['name']}" for t in data["tracks"]["items"]]
                 return tracks, name
 
         except Exception as e:
+            print(f"[Spotify] {token_type} 실패: {e}")
             last_err = e
-            continue  # 다음 토큰으로 재시도
+            continue
 
     raise Exception(f"Spotify 접근 실패: {last_err}\n비공개 플레이리스트는 ⚙ 설정 → 🔑 로그인이 필요합니다.")
 
