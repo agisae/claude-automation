@@ -223,13 +223,126 @@ def _fetch_playlist_tracks(token, playlist_id):
         offset += 100
     return tracks, name
 
+def _fetch_via_embed(url_type, item_id):
+    """Spotify 임베드 페이지에서 트랙 목록을 스크래핑 (API 키 불필요)."""
+    embed_url = f"https://open.spotify.com/embed/{url_type}/{item_id}"
+    req = urllib.request.Request(embed_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    with urllib.request.urlopen(req, timeout=15) as r:
+        html = r.read().decode("utf-8", errors="ignore")
+
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if not m:
+        raise Exception("임베드 페이지에서 __NEXT_DATA__ 없음")
+
+    data = json.loads(m.group(1))
+
+    # Navigate to entity — path may vary by page version
+    try:
+        entity = data["props"]["pageProps"]["state"]["data"]["entity"]
+    except (KeyError, TypeError):
+        raise Exception("임베드 데이터 구조가 예상과 다릅니다")
+
+    name = entity.get("name", "Unknown")
+    tracks = []
+
+    # Playlists use trackList[], albums may use tracks.items[]
+    track_list = entity.get("trackList") or []
+    for t in track_list:
+        if not t:
+            continue
+        title = (t.get("title") or "").strip()
+        artist = (t.get("subtitle") or "").strip()
+        if title:
+            tracks.append(f"{artist} - {title}" if artist else title)
+
+    if not tracks:
+        # Album fallback path
+        items = (entity.get("tracks") or {}).get("items") or []
+        for t in items:
+            if not t:
+                continue
+            title = (t.get("name") or "").strip()
+            artists = ", ".join(a["name"] for a in t.get("artists", []) if a.get("name"))
+            if title:
+                tracks.append(f"{artists} - {title}" if artists else title)
+
+    if not tracks:
+        raise Exception("임베드에서 트랙을 찾을 수 없습니다")
+
+    return tracks, name
+
+def _fetch_via_ytdlp(url):
+    """yt-dlp 내장 Spotify 추출기로 트랙 목록 가져오기."""
+    tracks = []
+    name = "Spotify"
+
+    ydl_opts = {
+        "extract_flat": True,
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 20,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if not info:
+        raise Exception("yt-dlp: 정보 없음")
+
+    name = info.get("title") or info.get("playlist_title") or name
+    entries = info.get("entries") or []
+    if not entries:
+        title = (info.get("title") or "").strip()
+        artist = (info.get("uploader") or info.get("artist") or "").strip()
+        if title:
+            tracks.append(f"{artist} - {title}" if artist else title)
+    else:
+        for e in entries:
+            if not e:
+                continue
+            title = (e.get("title") or "").strip()
+            artist = (e.get("uploader") or e.get("artist") or "").strip()
+            if title:
+                tracks.append(f"{artist} - {title}" if artist else title)
+
+    if not tracks:
+        raise Exception("yt-dlp: 트랙 없음")
+    return tracks, name
+
 def get_spotify_tracks(url):
     url_type = spotify_url_type(url)
 
     if url_type == "track":
         return _oembed_track(url)
 
-    # 토큰 우선순위: 1) 캐시된 OAuth, 2) 익명 웹플레이어 토큰
+    m = re.search(r"/(playlist|album)/([A-Za-z0-9]+)", url)
+    item_id = m.group(2) if m else None
+
+    errors = []
+
+    # Method 1: 임베드 페이지 스크래핑 (API 키 / 개발자 앱 제한 없음)
+    if item_id:
+        try:
+            result = _fetch_via_embed(url_type, item_id)
+            print(f"[Spotify] embed 방식 성공: {len(result[0])}곡")
+            return result
+        except Exception as e:
+            print(f"[Spotify] embed 실패: {e}")
+            errors.append(f"embed: {e}")
+
+    # Method 2: yt-dlp 내장 Spotify 추출기
+    try:
+        result = _fetch_via_ytdlp(url)
+        print(f"[Spotify] yt-dlp 방식 성공: {len(result[0])}곡")
+        return result
+    except Exception as e:
+        print(f"[Spotify] yt-dlp 실패: {e}")
+        errors.append(f"yt-dlp: {e}")
+
+    # Method 3: OAuth API (개발자 앱 Extended Quota Mode 필요)
     tokens_to_try = []
     try:
         t = _spotify_token()
@@ -242,20 +355,14 @@ def get_spotify_tracks(url):
     except Exception:
         pass
 
-    if not tokens_to_try:
-        raise Exception("Spotify 토큰을 가져올 수 없습니다.\n⚙ Spotify 설정에서 키를 확인하거나 네트워크를 확인해 주세요.")
-
-    last_err = None
     for token_type, token in tokens_to_try:
-        print(f"[Spotify] {token_type} 토큰으로 시도 중... ({url_type})")
+        print(f"[Spotify] API({token_type}) 시도 중...")
         try:
             if url_type == "playlist":
                 playlist_id = re.search(r"/playlist/([A-Za-z0-9]+)", url).group(1)
-                print(f"[Spotify] 플레이리스트 ID: {playlist_id}")
                 result = _fetch_playlist_tracks(token, playlist_id)
-                print(f"[Spotify] 성공: {len(result[0])}곡")
+                print(f"[Spotify] API 성공: {len(result[0])}곡")
                 return result
-
             elif url_type == "album":
                 album_id = re.search(r"/album/([A-Za-z0-9]+)", url).group(1)
                 data = _spotify_get(token, f"albums/{album_id}")
@@ -263,13 +370,11 @@ def get_spotify_tracks(url):
                 artist = data["artists"][0]["name"]
                 tracks = [f"{artist} - {t['name']}" for t in data["tracks"]["items"]]
                 return tracks, name
-
         except Exception as e:
-            print(f"[Spotify] {token_type} 실패: {e}")
-            last_err = e
-            continue
+            print(f"[Spotify] API({token_type}) 실패: {e}")
+            errors.append(f"API({token_type}): {e}")
 
-    raise Exception(f"Spotify 접근 실패: {last_err}\n비공개 플레이리스트는 ⚙ 설정 → 🔑 로그인이 필요합니다.")
+    raise Exception("Spotify 접근 실패 (모든 방법 시도함):\n" + "\n".join(errors[-3:]))
 
 
 class DownloadRow(ctk.CTkFrame):
