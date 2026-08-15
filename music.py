@@ -106,9 +106,13 @@ def do_spotify_login(cid, secret):
             p = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             if "code" in p:
                 code_box[0] = p["code"][0]
+            body = "<html><meta charset='utf-8'><body><h2>로그인 완료! 이 탭을 닫으세요.</h2></body></html>"
+            body_bytes = body.encode("utf-8")
             self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body_bytes)))
             self.end_headers()
-            self.wfile.write("로그인 완료! 이 탭을 닫으세요.".encode("utf-8"))
+            self.wfile.write(body_bytes)
             threading.Thread(target=self.server.shutdown, daemon=True).start()
         def log_message(self, *args): pass
 
