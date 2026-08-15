@@ -416,31 +416,44 @@ class App(ctk.CTk):
         sec_entry.insert(0, cfg.get("spotify_client_secret", ""))
         sec_entry.pack(padx=24)
 
-        # Show login status
+        # Show login status (dynamic label so logout can update it)
         import time as _time
-        login_status = "로그인 상태: 없음"
-        login_color = "gray60"
-        if os.path.exists(TOKEN_CACHE):
+
+        def _get_login_status():
+            if os.path.exists(TOKEN_CACHE):
+                try:
+                    with open(TOKEN_CACHE) as _f:
+                        _c = json.load(_f)
+                    if _c.get("expires_at", 0) > _time.time():
+                        return "✅ Spotify 로그인됨 (OAuth 토큰 유효)", "#4CAF50"
+                    elif _c.get("refresh_token"):
+                        return "⚠️ 로그인됨 (토큰 만료, 자동 갱신 예정)", "#FF9800"
+                    else:
+                        return "❌ 갱신 불가 — 다시 로그인 필요", "#f44336"
+                except Exception:
+                    return "❌ 캐시 손상 — 다시 로그인 필요", "#f44336"
+            return "로그인 상태: 없음", "gray60"
+
+        status_txt, status_col = _get_login_status()
+        status_lbl = ctk.CTkLabel(win, text=status_txt, font=ctk.CTkFont(size=11),
+                                  text_color=status_col)
+        status_lbl.pack(padx=24, pady=(8, 0), anchor="w")
+
+        def logout():
             try:
-                with open(TOKEN_CACHE) as _f:
-                    _c = json.load(_f)
-                if _c.get("expires_at", 0) > _time.time():
-                    login_status = "✅ Spotify 로그인됨 (OAuth 토큰 유효)"
-                    login_color = "#4CAF50"
-                elif _c.get("refresh_token"):
-                    login_status = "⚠️ 로그인됨 (토큰 만료, 자동 갱신 시도)"
-                    login_color = "#FF9800"
-                else:
-                    login_status = "❌ 캐시 있음, 갱신 불가 — 다시 로그인 필요"
-                    login_color = "#f44336"
+                os.remove(TOKEN_CACHE)
             except Exception:
-                login_status = "❌ 캐시 손상 — 다시 로그인 필요"
-                login_color = "#f44336"
-        ctk.CTkLabel(win, text=login_status, font=ctk.CTkFont(size=11),
-                     text_color=login_color).pack(padx=24, pady=(8, 0), anchor="w")
+                pass
+            status_lbl.configure(text="로그인 상태: 없음", text_color="gray60")
+            test_lbl.configure(text="로그아웃 완료. 다시 🔑 로그인해 주세요.", text_color="gray60")
+
+        logout_btn = ctk.CTkButton(win, text="로그아웃", width=80, height=26,
+                                   fg_color="gray25", hover_color="gray35",
+                                   font=ctk.CTkFont(size=11), command=logout)
+        logout_btn.pack(padx=24, pady=(4, 0), anchor="w")
 
         test_lbl = ctk.CTkLabel(win, text="", font=ctk.CTkFont(size=11))
-        test_lbl.pack(padx=24, pady=(4, 0), anchor="w")
+        test_lbl.pack(padx=24, pady=(2, 0), anchor="w")
 
         def test_connection():
             cid = cid_entry.get().strip()
