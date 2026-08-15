@@ -288,29 +288,44 @@ def _fetch_via_embed(url_type, item_id):
 
     print(f"[Spotify] 임베드 첫 배치: {len(tracks)}곡")
 
-    # Paginate remaining tracks using the page-embedded token (bypasses dev app quota)
-    if embed_token and url_type == "playlist":
-        offset = len(tracks)
-        while True:
+    # Paginate with OAuth or CC token (/tracks sub-endpoint, not root playlist endpoint)
+    if url_type == "playlist":
+        pagination_token = None
+        # Try OAuth cache first, then client credentials
+        for getter in (_spotify_token, lambda: _exchange_token(
+                load_config().get("spotify_client_id",""),
+                load_config().get("spotify_client_secret",""),
+                {"grant_type": "client_credentials"})["access_token"]):
             try:
-                page = _spotify_get(embed_token,
-                    f"playlists/{item_id}/tracks?limit=100&offset={offset}")
-                print(f"[Spotify] offset={offset} → {len(page.get('items', []))}곡, next={bool(page.get('next'))}")
-            except Exception as e:
-                print(f"[Spotify] 페이지네이션 실패 offset={offset}: {e}")
-                break
-            added = 0
-            for item in page.get("items", []):
-                t = item.get("track")
-                if t and t.get("name"):
-                    artists = ", ".join(a["name"] for a in t.get("artists", []))
-                    tracks.append(f"{artists} - {t['name']}" if artists else t["name"])
-                    added += 1
-            if not page.get("next") or added == 0:
-                break
-            offset += 100
-    elif url_type == "playlist":
-        print("[Spotify] embed token 없음 — 페이지네이션 불가")
+                t = getter()
+                if t:
+                    pagination_token = t
+                    break
+            except Exception:
+                pass
+
+        if pagination_token:
+            offset = len(tracks)
+            while True:
+                try:
+                    page = _spotify_get(pagination_token,
+                        f"playlists/{item_id}/tracks?limit=100&offset={offset}")
+                    print(f"[Spotify] offset={offset} → {len(page.get('items', []))}곡")
+                except Exception as e:
+                    print(f"[Spotify] 페이지네이션 실패 offset={offset}: {e}")
+                    break
+                added = 0
+                for item in page.get("items", []):
+                    t = item.get("track")
+                    if t and t.get("name"):
+                        artists = ", ".join(a["name"] for a in t.get("artists", []))
+                        tracks.append(f"{artists} - {t['name']}" if artists else t["name"])
+                        added += 1
+                if not page.get("next") or added == 0:
+                    break
+                offset += 100
+        else:
+            print("[Spotify] 페이지네이션 토큰 없음")
 
     print(f"[Spotify] 최종 트랙 수: {len(tracks)}")
     return tracks, name
