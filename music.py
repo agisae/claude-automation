@@ -978,6 +978,7 @@ class App(ctk.CTk):
             "retries": 3,
             "quiet": True, "no_warnings": True,
             "windowsfilenames": True,
+            "noplaylist": True,
             "extractor_args": {"youtube": {"player_client": ["android"]}},
         }
 
