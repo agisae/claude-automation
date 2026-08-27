@@ -182,6 +182,30 @@ def clean_url(url):
         return urlunparse(parsed._replace(query=urlencode(keep, doseq=True)))
     return url
 
+def is_youtube_playlist(url):
+    """순수 플레이리스트 URL 여부 (v= 없이 list= 만 있는 경우)."""
+    from urllib.parse import urlparse, parse_qs
+    p = parse_qs(urlparse(url).query)
+    return "list" in p and "v" not in p
+
+def get_youtube_playlist_videos(url):
+    """YouTube 플레이리스트의 영상 목록 반환."""
+    with yt_dlp.YoutubeDL({"extract_flat": True, "quiet": True, "no_warnings": True}) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if not info:
+        raise Exception("플레이리스트 정보를 가져올 수 없습니다.")
+    name = info.get("title") or "YouTube Playlist"
+    videos = []
+    for e in (info.get("entries") or []):
+        if not e:
+            continue
+        vid_id = e.get("id") or ""
+        title = e.get("title") or vid_id or "Unknown"
+        vid_url = e.get("url") or (f"https://www.youtube.com/watch?v={vid_id}" if vid_id else "")
+        if vid_url:
+            videos.append((title, vid_url))
+    return videos, name
+
 def detect_source(url):
     if "spotify.com" in url:
         return "spotify"
@@ -1041,9 +1065,18 @@ class App(ctk.CTk):
                     _run_ydl(opts, f"ytsearch1:{query}", timeout=180)
                     _mark_done(query)
 
+            elif is_youtube_playlist(url):
+                self.after(0, row.set_status, "플레이리스트 정보 가져오는 중...", 0.05)
+                videos, pl_name = get_youtube_playlist_videos(url)
+                count = len(videos)
+                self.after(0, row.set_title, f"{pl_name}  ({count}곡)")
+                for i, (title, vid_url) in enumerate(videos):
+                    pct = 0.1 + (i / count * 0.85)
+                    self.after(0, row.set_status, f"[{i+1}/{count}] {title[:50]}", pct)
+                    _run_ydl(opts, vid_url, timeout=300)
             else:
                 self.after(0, row.set_status, "정보 가져오는 중...", 0.05)
-                _run_ydl(opts, url, timeout=600)
+                _run_ydl(opts, url, timeout=300)
 
             _done[0] = True
             if source == "spotify" and skipped:
