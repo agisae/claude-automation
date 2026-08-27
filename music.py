@@ -949,8 +949,11 @@ class App(ctk.CTk):
         url = clean_url(url)
         source = detect_source(url)
         self.after(0, row.set_status, "시작 중...", 0.02)
+        _done = [False]  # prevent hook updates after done/failed
 
         def hook(d):
+            if _done[0]:
+                return
             if d["status"] == "downloading":
                 total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
                 done = d.get("downloaded_bytes", 0)
@@ -976,8 +979,6 @@ class App(ctk.CTk):
             "quiet": True, "no_warnings": True,
             "windowsfilenames": True,
             "extractor_args": {"youtube": {"player_client": ["android"]}},
-            "nooverwrites": True,
-            "download_archive": os.path.join(save_dir, ".ytdl_archive"),
         }
 
         sp_history_file = os.path.join(save_dir, ".spotify_downloaded")
@@ -1043,6 +1044,7 @@ class App(ctk.CTk):
                 self.after(0, row.set_status, "정보 가져오는 중...", 0.05)
                 _run_ydl(opts, url, timeout=600)
 
+            _done[0] = True
             if source == "spotify" and skipped:
                 self.after(0, row.done, True)
                 self.after(0, row.set_status,
@@ -1052,6 +1054,7 @@ class App(ctk.CTk):
                 self.after(0, row.done, True)
 
         except Exception as e:
+            _done[0] = True
             err = str(e)
             short = err[:100] if err else "알 수 없는 오류"
             self.after(0, row.done, False, short)
